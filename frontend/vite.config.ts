@@ -104,7 +104,9 @@ export default defineConfig({
         target: 'http://localhost:8083',
         changeOrigin: true,
       },
-      '/logistic-request': {
+      // ВАЖНО: проксируем только quote-страницу, чтобы не перехватывать SPA-роут
+      // `/logistic-requests` (иначе при refresh получаем пустой ответ от бэкенда).
+      '/logistic-request/quote': {
         target: 'http://localhost:8083',
         changeOrigin: true,
       },

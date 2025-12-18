@@ -1,9 +1,5 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAppDispatch, useAppSelector } from '../../shared/store/hooks';
-import { logoutUser } from '../../shared/store/slices/authSlice';
-import { clearFilters } from '../../shared/store/slices/filtersSlice';
-import { clearOrdersState } from '../../shared/store/slices/ordersSlice';
-import { clearUserDraft, resetDraftState } from '../../shared/store/slices/draftSlice';
+import { Link, useLocation } from 'react-router-dom';
+import { useAppSelector } from '../../shared/store/hooks';
 
 /**
  * Компонент навигационной панели
@@ -13,20 +9,7 @@ import { clearUserDraft, resetDraftState } from '../../shared/store/slices/draft
  */
 export function Navbar() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const dispatch = useAppDispatch();
-  const { isAuthenticated, user, isLoading } = useAppSelector((state) => state.auth);
-
-  const handleLogout = async () => {
-    // Сначала пытаемся очистить черновик на сервере, пока токен ещё валиден
-    await dispatch(clearUserDraft());
-    // Сбрасываем UI-состояния согласно требованию лаб7
-    dispatch(clearFilters());
-    dispatch(clearOrdersState());
-    dispatch(resetDraftState());
-    await dispatch(logoutUser());
-    navigate('/');
-  };
+  const { isAuthenticated } = useAppSelector((state) => state.auth);
 
   return (
     <header className="header">
@@ -49,24 +32,12 @@ export function Navbar() {
         {/* Меню пользователя */}
         {isAuthenticated ? (
           <>
-            {location.pathname !== '/orders' && (
-              <Link to="/orders" className="home-btn">📋 Мои заявки</Link>
+            {location.pathname !== '/logistic-requests' && (
+              <Link to="/logistic-requests" className="home-btn">📋 Мои заявки</Link>
             )}
             {location.pathname !== '/profile' && (
               <Link to="/profile" className="home-btn">👤 ЛК</Link>
             )}
-            <span className="home-btn" style={{ cursor: 'default', opacity: 0.9 }}>
-              {user?.name || user?.login || 'Пользователь'}
-            </span>
-            <button
-              type="button"
-              className="home-btn"
-              onClick={handleLogout}
-              disabled={isLoading}
-              aria-disabled={isLoading}
-            >
-              {isLoading ? 'Выход...' : '🚪 Выход'}
-            </button>
           </>
         ) : (
           <>

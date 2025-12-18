@@ -55,7 +55,7 @@ export function App() {
 
         {/* User */}
         <Route
-          path="/orders"
+          path="/logistic-requests"
           element={(
             <ProtectedRoute>
               <OrdersList />
@@ -63,7 +63,7 @@ export function App() {
           )}
         />
         <Route
-          path="/orders/:id"
+          path="/logistic-requests/:id"
           element={(
             <ProtectedRoute>
               <OrderDetails />

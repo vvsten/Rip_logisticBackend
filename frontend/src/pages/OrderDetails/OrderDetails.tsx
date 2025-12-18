@@ -109,7 +109,7 @@ export function OrderDetails() {
       },
     }));
     if (formOrder.fulfilled.match(result)) {
-      navigate('/orders');
+      navigate('/logistic-requests');
     }
   };
 
@@ -126,7 +126,7 @@ export function OrderDetails() {
       <div className="container" style={{ margin: '2rem auto', textAlign: 'center' }}>
         <p>Заявка не найдена</p>
         <button
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/logistic-requests')}
           style={{
             marginTop: '1rem',
             padding: '0.5rem 1rem',
@@ -148,7 +148,7 @@ export function OrderDetails() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
         <h2>Заявка #{currentOrder.id}</h2>
         <button
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/logistic-requests')}
           style={{
             padding: '0.5rem 1rem',
             backgroundColor: '#6c757d',

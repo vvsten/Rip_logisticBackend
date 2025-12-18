@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../shared/store/hooks';
-import { fetchUserProfile, updateUserProfile, clearError } from '../../shared/store/slices/authSlice';
+import { fetchUserProfile, updateUserProfile, clearError, logoutUser } from '../../shared/store/slices/authSlice';
+import { clearFilters } from '../../shared/store/slices/filtersSlice';
+import { clearOrdersState } from '../../shared/store/slices/ordersSlice';
+import { clearUserDraft, resetDraftState } from '../../shared/store/slices/draftSlice';
 import { LoadingSpinner } from '../../shared/components/LoadingSpinner/LoadingSpinner';
 
 /**
@@ -62,6 +65,17 @@ export function Profile() {
       setIsEditing(false);
       setMessage('Профиль успешно обновлен');
     }
+  };
+
+  const handleLogout = async () => {
+    // Сначала пытаемся очистить черновик на сервере, пока токен ещё валиден
+    await dispatch(clearUserDraft());
+    // Сбрасываем UI-состояния согласно требованию лаб7
+    dispatch(clearFilters());
+    dispatch(clearOrdersState());
+    dispatch(resetDraftState());
+    await dispatch(logoutUser());
+    navigate('/');
   };
 
   if (!isAuthenticated) {
@@ -239,6 +253,32 @@ export function Profile() {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{
+        backgroundColor: 'white',
+        padding: '1.5rem',
+        borderRadius: '8px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      }}>
+        <h3 style={{ marginBottom: '1rem' }}>Аккаунт</h3>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={isLoading}
+          aria-disabled={isLoading}
+          style={{
+            padding: '0.75rem 1.25rem',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.7 : 1,
+          }}
+        >
+          {isLoading ? 'Выходим...' : '🚪 Выход'}
+        </button>
       </div>
     </div>
   );

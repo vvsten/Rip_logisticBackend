@@ -461,7 +461,7 @@
                 const data = await response.json();
                 if (response.ok && (data.success || data.status === 'success')) {
                     const requestId = data.request_id;
-                    // 1) Пытаемся сформировать заявку, чтобы она появилась в списке (/orders)
+                    // 1) Пытаемся сформировать заявку, чтобы она появилась в списке (/logistic-requests)
                     // (если формирование не удалось — оставляем черновиком и ведём на страницу заявки)
                     let formed = false;
                     try {
@@ -518,9 +518,9 @@
                     // 3) Переходим в React UI
                     setTimeout(() => {
                         if (formed) {
-                            window.location.href = '/orders';
+                            window.location.href = '/logistic-requests';
                         } else if (requestId) {
-                            window.location.href = `/orders/${requestId}`;
+                            window.location.href = `/logistic-requests/${requestId}`;
                         } else {
                             window.location.href = '/';
                         }

@@ -225,7 +225,7 @@ export function OrdersList() {
                       <td style={{ padding: '1rem' }}>{formatDate(order.created_at)}</td>
                       <td style={{ padding: '1rem' }}>
                         <button
-                          onClick={() => navigate(`/orders/${order.id}`)}
+                          onClick={() => navigate(`/logistic-requests/${order.id}`)}
                           style={{
                             padding: '0.5rem 1rem',
                             backgroundColor: '#0d6efd',

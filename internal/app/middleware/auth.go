@@ -189,7 +189,8 @@ func (am *AuthMiddleware) extractToken(c *gin.Context) string {
 	}
 
 	// Проверяем формат "Bearer <token>"
-	parts := strings.Split(authHeader, " ")
+	// Используем Fields, чтобы корректно обработать любые пробельные символы (в т.ч. перенос строки из Postman).
+	parts := strings.Fields(authHeader)
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return ""
 	}
