@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Заявка №{{ .order.ID }} - GruzDelivery</title>
+    <title>Логистическая заявка №{{ .logistic_request.ID }} - GruzDelivery</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -12,53 +12,53 @@
             <div class="logo-icon">🚚</div>
             GruzDelivery
         </a>
-        <a href="/calculator" class="home-btn">🧮 Калькулятор</a>
+        <a href="/delivery-quote" class="home-btn">🧮 Расчёт перевозки</a>
     </header>
 
     <div class="container">
         <div class="order-details">
-            <h1 class="order-details-title">Заявка №{{ .order.ID }}</h1>
+            <h1 class="order-details-title">Логистическая заявка №{{ .logistic_request.ID }}</h1>
             
             <div class="order-params">
                 <div class="param-item">
                     <div class="param-label">Откуда</div>
-                    <div class="param-value">{{ .order.FromCity }}</div>
+                    <div class="param-value">{{ .logistic_request.FromCity }}</div>
                 </div>
                 <div class="param-item">
                     <div class="param-label">Куда</div>
-                    <div class="param-value">{{ .order.ToCity }}</div>
+                    <div class="param-value">{{ .logistic_request.ToCity }}</div>
                 </div>
                 <div class="param-item">
                     <div class="param-label">Вес груза</div>
-                    <div class="param-value">{{ .order.Weight }} кг</div>
+                    <div class="param-value">{{ .logistic_request.Weight }} кг</div>
                 </div>
                 <div class="param-item">
                     <div class="param-label">Длина</div>
-                    <div class="param-value">{{ .order.Length }} м</div>
+                    <div class="param-value">{{ .logistic_request.Length }} м</div>
                 </div>
                 <div class="param-item">
                     <div class="param-label">Ширина</div>
-                    <div class="param-value">{{ .order.Width }} м</div>
+                    <div class="param-value">{{ .logistic_request.Width }} м</div>
                 </div>
                 <div class="param-item">
                     <div class="param-label">Высота</div>
-                    <div class="param-value">{{ .order.Height }} м</div>
+                    <div class="param-value">{{ .logistic_request.Height }} м</div>
                 </div>
             </div>
 
             <div class="order-summary">
                 <div class="order-summary-title">Итоговая стоимость</div>
-                <div class="order-summary-value">{{ .order.TotalCost }} рублей</div>
+                <div class="order-summary-value">{{ .logistic_request.TotalCost }} рублей</div>
             </div>
 
             <div class="order-summary" style="background-color: var(--accent-blue);">
                 <div class="order-summary-title">Сроки доставки</div>
-                <div class="order-summary-value">{{ .order.TotalDays }} дней</div>
+                <div class="order-summary-value">{{ .logistic_request.TotalDays }} дней</div>
             </div>
 
             <div class="order-status-section">
-                <div class="order-status-title">Статус заказа</div>
-                <div class="order-status-value" id="order-status">{{ .order.Status }}</div>
+                <div class="order-status-title">Статус заявки</div>
+                <div class="order-status-value" id="order-status">{{ .logistic_request.Status }}</div>
                 
                 <div class="status-buttons">
                     <button class="status-btn" onclick="updateStatus('pending')" data-status="pending">⏳ Ожидает</button>
@@ -85,8 +85,8 @@
                         <strong>Макс. объем:</strong> {{ $service.MaxVolume }} м³
                     </div>
                     <div class="order-service-params">
-                        <div class="order-service-param">Количество: {{ index $.order.Services $index "Quantity" }}</div>
-                        <div class="order-service-param">Комментарий: {{ index $.order.Services $index "Comment" }}</div>
+                        <div class="order-service-param">Количество: {{ index $.logistic_request.Services $index "Quantity" }}</div>
+                        <div class="order-service-param">Комментарий: {{ index $.logistic_request.Services $index "Comment" }}</div>
                     </div>
                 </div>
             </div>
@@ -100,14 +100,14 @@
 
     <script>
         function updateStatus(newStatus) {
-            const orderId = {{ .order.ID }};
+            const logisticRequestId = {{ .logistic_request.ID }};
             
             // Показываем загрузку
             const statusElement = document.getElementById('order-status');
             statusElement.textContent = 'Обновление...';
             
             // Отправляем запрос
-            fetch(`/api/logistic-requests/${orderId}/status`, {
+            fetch(`/api/logistic-requests/${logisticRequestId}/status`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -132,13 +132,13 @@
                     showNotification('Статус успешно обновлен!', 'success');
                 } else {
                     showNotification('Ошибка обновления статуса: ' + data.error, 'error');
-                    statusElement.textContent = '{{ .order.Status }}'; // Возвращаем старый статус
+                    statusElement.textContent = '{{ .logistic_request.Status }}'; // Возвращаем старый статус
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 showNotification('Ошибка соединения', 'error');
-                statusElement.textContent = '{{ .order.Status }}'; // Возвращаем старый статус
+                statusElement.textContent = '{{ .logistic_request.Status }}'; // Возвращаем старый статус
             });
         }
         
@@ -187,7 +187,7 @@
         
         // Выделяем активную кнопку при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
-            const currentStatus = '{{ .order.Status }}';
+            const currentStatus = '{{ .logistic_request.Status }}';
             document.querySelectorAll('.status-btn').forEach(btn => {
                 if (btn.dataset.status === currentStatus) {
                     btn.classList.add('active');
@@ -196,4 +196,5 @@
         });
     </script>
 </body>
-</html> 
+</html>
+

@@ -78,20 +78,6 @@ export default defineConfig({
         target: 'http://localhost:8083',
         changeOrigin: true,
       },
-      // Прокси для калькулятора - отдаем бэкенду
-      '/calculator': {
-        target: 'http://localhost:8083',
-        changeOrigin: true,
-      },
-      // Прокси для других страниц бэкенда (order, service)
-      '/order': {
-        target: 'http://localhost:8083',
-        changeOrigin: true,
-      },
-      '/service': {
-        target: 'http://localhost:8083',
-        changeOrigin: true,
-      },
       // Прокси для статических файлов бэкенда (CSS, JS, изображения)
       '/static': {
         target: 'http://localhost:8083',

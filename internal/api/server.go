@@ -1,74 +1,116 @@
 package api
 
 import (
-  "github.com/gin-gonic/gin"
-  "github.com/sirupsen/logrus"
-  "log"
-  "rip-go-app/internal/app/handler"
-  "rip-go-app/internal/app/repository"
+	"fmt"
+	"log"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
+	"rip-go-app/internal/app/auth"
+	"rip-go-app/internal/app/config"
+	"rip-go-app/internal/app/dsn"
+	"rip-go-app/internal/app/handler"
+	"rip-go-app/internal/app/middleware"
+	"rip-go-app/internal/app/repository"
+	"rip-go-app/internal/app/service"
 )
 
 func StartServer() {
 	log.Println("Starting server")
 
-	repo, err := repository.NewRepository()
+	conf, err := config.NewConfig()
 	if err != nil {
-		logrus.Error("ошибка инициализации репозитория")
+		logrus.Fatalf("error loading config: %v", err)
 	}
 
-	handler := handler.NewHandler(repo)
+	postgresString := dsn.FromEnv()
+
+	repo, err := repository.New(postgresString)
+	if err != nil {
+		logrus.Fatalf("error initializing repository: %v", err)
+	}
+
+	jwtService := auth.NewJWTService(
+		conf.JWTSecret,
+		conf.JWTAccessTokenExpire,
+		conf.JWTRefreshTokenExpire,
+	)
+
+	redisService := auth.NewRedisService(
+		conf.RedisHost,
+		conf.RedisPort,
+		conf.RedisPassword,
+		conf.RedisDB,
+	)
+
+	authService := service.NewAuthService(repo, jwtService, redisService)
+	authMiddleware := middleware.NewAuthMiddleware(jwtService, redisService)
+
+	h := handler.NewHandler(repo, authService, authMiddleware)
 
 	r := gin.Default()
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowCredentials: true,
+	}))
 	// добавляем наш html/шаблон
 	r.LoadHTMLGlob("templates/*.html")
 	// добавляем статические файлы (CSS, JS, изображения)
 	r.Static("/static", "static")
 
-	// Маршруты для четырех страниц
-	r.GET("/", handler.GetServices)                    // Главная страница со списком услуг
-	r.GET("/service/:id", handler.GetService)          // Страница с подробной информацией об услуге
-	r.GET("/order", handler.GetLogisticRequestDetails)           // Страница с деталями заявки
-	r.GET("/calculator", handler.GetCalculator)        // Страница калькулятора
-	r.POST("/calculator", handler.PostCalculator)      // Обработка формы калькулятора
+	// HTML страницы (доменные)
+	r.GET("/", h.GetTransportServicesPage)
+	r.GET("/transport-services/:id", h.GetTransportServicePage)
+	r.GET("/logistic-request", h.GetLogisticRequestDetailsPage)
+	r.GET("/delivery-quote", h.GetDeliveryQuotePage)
+	r.POST("/delivery-quote", h.PostDeliveryQuote)
 
-	// API маршруты для корзины
-	r.POST("/api/cart/add/:id", handler.AddToCart)     // Добавление услуги в корзину
-	r.DELETE("/api/cart/remove/:id", handler.RemoveFromCart) // Удаление услуги из корзины
-	r.GET("/api/cart", handler.GetCart)                // Получение корзины
-	r.GET("/api/cart/count", handler.GetCartCount)     // Получение количества в корзине
+	// Черновик логистической заявки (guest)
+	r.POST("/api/logistic-requests/draft/services/:service_id", h.AddTransportServiceToDraftLogisticRequest)
+	r.DELETE("/api/logistic-requests/draft", h.ClearDraftLogisticRequest)
+	r.GET("/api/logistic-requests/draft", h.GetDraftLogisticRequest)
+	r.GET("/api/logistic-requests/draft/count", h.GetDraftLogisticRequestServiceCount)
+	r.GET("/api/logistic-requests/draft/icon", h.GetDraftLogisticRequestIcon)
 
-	// API маршруты для калькулятора (переименованы под грузоперевозки)
-	r.POST("/api/searchtrans", handler.SearchTransport) // Поиск транспорта
-	r.POST("/api/calculatecargo", handler.CalculateService) // Расчет стоимости грузоперевозки
-	r.POST("/api/submitcargoorder", handler.SubmitLogisticRequest) // Отправка заявки на грузоперевозку
+	// Доменные операции
+	r.POST("/api/transport-services/search", h.SearchTransportServices)
+	r.POST("/api/logistic-requests/quote", h.CalculateLogisticRequestQuote)
 
-    // API маршруты для заявок — старые алиасы
-    r.GET("/api/orders", handler.GetLogisticRequests)
-    r.PUT("/api/orders/:id/form", handler.FormLogisticRequest)
-    r.PUT("/api/orders/:id/complete", handler.CompleteLogisticRequest)
-    r.DELETE("/api/orders/:id/services/:service_id", handler.RemoveServiceFromLogisticRequest)
-    r.PUT("/api/orders/:id/services/:service_id", handler.UpdateLogisticRequestService)
-    r.GET("/api/orders/:id", handler.GetLogisticRequest)
-    r.PUT("/api/orders/:id", handler.UpdateLogisticRequest)
-    r.DELETE("/api/orders/:id", handler.DeleteLogisticRequest)
+	// CRUD transport-services
+	r.GET("/api/transport-services", h.GetTransportServices)
+	r.GET("/api/transport-services/:id", h.GetTransportService)
+	r.POST("/api/transport-services", h.CreateTransportService)
+	r.PUT("/api/transport-services/:id", h.UpdateTransportService)
+	r.DELETE("/api/transport-services/:id", h.DeleteTransportService)
 
-    // Новые маршруты для логистических заявок
-    r.GET("/api/logistic-requests", handler.GetLogisticRequests)
-    r.PUT("/api/logistic-requests/:id/form", handler.FormLogisticRequest)
-    r.PUT("/api/logistic-requests/:id/complete", handler.CompleteLogisticRequest)
-    r.DELETE("/api/logistic-requests/:id/services/:service_id", handler.RemoveServiceFromLogisticRequest)
-    r.PUT("/api/logistic-requests/:id/services/:service_id", handler.UpdateLogisticRequestService)
-    r.GET("/api/logistic-requests/:id", handler.GetLogisticRequest)
-    r.PUT("/api/logistic-requests/:id", handler.UpdateLogisticRequest)
-    r.DELETE("/api/logistic-requests/:id", handler.DeleteLogisticRequest)
+	// Авторизация
+	r.POST("/api/users/register", h.RegisterUser)
+	r.POST("/api/users/login", h.LoginUser)
+	r.POST("/api/users/logout", h.AuthMiddleware.RequireAuth(), h.LogoutUser)
+	r.GET("/api/users/profile", h.AuthMiddleware.RequireAuth(), h.GetUserProfile)
+	r.PUT("/api/users/profile", h.AuthMiddleware.RequireAuth(), h.UpdateUserProfile)
 
-	// API маршруты для пользователей
-	r.POST("/api/users/register", handler.RegisterUser)   // Регистрация пользователя
-	r.POST("/api/users/login", handler.LoginUser)         // Аутентификация
-	r.POST("/api/users/logout", handler.LogoutUser)       // Деавторизация
-	r.GET("/api/users/profile", handler.GetUserProfile)   // Получение профиля пользователя
-	r.PUT("/api/users/profile", handler.UpdateUserProfile) // Обновление профиля пользователя
+	// Логистические заявки (auth)
+	lr := r.Group("/api/logistic-requests")
+	lr.Use(h.AuthMiddleware.RequireAuth())
+	{
+		lr.POST("", h.CreateCargoLogisticRequest)
+		lr.GET("", h.GetLogisticRequests)
+		lr.GET("/:id", h.GetLogisticRequest)
+		lr.DELETE("/:id", h.DeleteLogisticRequest)
+		lr.PUT("/:id/form", h.FormLogisticRequest)
+		lr.PUT("/:id/update", h.UpdateLogisticRequest)
+		lr.DELETE("/:id/services/:service_id", h.RemoveServiceFromLogisticRequest)
+		lr.PUT("/:id/services/:service_id", h.UpdateLogisticRequestService)
+	}
 
-	r.Run(":8083") // listen and serve on 0.0.0.0:8083
+	// Статус заявки
+	r.PUT("/api/logistic-requests/:id/status", h.UpdateLogisticRequestStatus)
+
+	serverAddress := fmt.Sprintf("%s:%d", conf.ServiceHost, conf.ServicePort)
+	r.Run(serverAddress)
 	log.Println("Server down")
 }

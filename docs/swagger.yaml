@@ -71,7 +71,7 @@ info:
   title: RIP Go API
   version: "1.0"
 paths:
-  /api/orders:
+  /api/logistic-requests:
     get:
       consumes:
       - application/json
@@ -114,7 +114,44 @@ paths:
       summary: Get logistic requests list
       tags:
       - logistic-requests
-  /api/orders/{id}/complete:
+    post:
+      consumes:
+      - application/json
+      description: Create a new cargo transportation logistic request
+      parameters:
+      - description: Logistic request data with services
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Logistic request submitted successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create cargo logistic request
+      tags:
+      - logistic-requests
+  /api/logistic-requests/{id}/complete:
     put:
       consumes:
       - application/json
@@ -163,44 +200,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Complete or reject logistic request
-      tags:
-      - logistic-requests
-  /api/submitcargoorder:
-    post:
-      consumes:
-      - application/json
-      description: Submit a new cargo transportation logistic request
-      parameters:
-      - description: Logistic request data with services
-        in: body
-        name: request
-        required: true
-        schema:
-          additionalProperties: true
-          type: object
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Logistic request submitted successfully
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Invalid request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - BearerAuth: []
-      summary: Submit cargo logistic request
       tags:
       - logistic-requests
   /login:

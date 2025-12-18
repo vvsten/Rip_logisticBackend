@@ -30,8 +30,8 @@ func New(dsn string) (*Repository, error) {
 	}, nil
 }
 
-// GetServices - получение всех услуг с возможностью фильтрации (исключая удалённые)
-func (r *Repository) GetServices(search string) ([]ds.TransportService, error) {
+// GetTransportServices - получение всех транспортных услуг с возможностью фильтрации (исключая удалённые)
+func (r *Repository) GetTransportServices(search string) ([]ds.TransportService, error) {
 	var services []ds.TransportService
 	
 	query := r.db.Where("deleted_at IS NULL")
@@ -50,8 +50,8 @@ func (r *Repository) GetServices(search string) ([]ds.TransportService, error) {
 	return services, nil
 }
 
-// GetServicesWithFilters - получение услуг с расширенными фильтрами для API
-func (r *Repository) GetServicesWithFilters(search string, minPrice, maxPrice *float64, dateFrom, dateTo *time.Time) ([]ds.TransportService, error) {
+// GetTransportServicesWithFilters - получение транспортных услуг с расширенными фильтрами для API
+func (r *Repository) GetTransportServicesWithFilters(search string, minPrice, maxPrice *float64, dateFrom, dateTo *time.Time) ([]ds.TransportService, error) {
 	var services []ds.TransportService
 	
 	query := r.db.Where("deleted_at IS NULL")
@@ -91,8 +91,8 @@ func (r *Repository) GetServicesWithFilters(search string, minPrice, maxPrice *f
 	return services, nil
 }
 
-// GetService - получение услуги по ID
-func (r *Repository) GetService(id int) (ds.TransportService, error) {
+// GetTransportService - получение транспортной услуги по ID
+func (r *Repository) GetTransportService(id int) (ds.TransportService, error) {
 	var service ds.TransportService
 	err := r.db.Where("id = ?", id).First(&service).Error
 	if err != nil {
@@ -101,8 +101,8 @@ func (r *Repository) GetService(id int) (ds.TransportService, error) {
 	return service, nil
 }
 
-// GetServiceByType - получение услуги по типу доставки
-func (r *Repository) GetServiceByType(deliveryType string) (ds.TransportService, error) {
+// GetTransportServiceByDeliveryType - получение транспортной услуги по типу доставки
+func (r *Repository) GetTransportServiceByDeliveryType(deliveryType string) (ds.TransportService, error) {
 	typeMap := map[string]int{
 		"fura":           1,
 		"malotonnazhnyi": 2,
@@ -113,22 +113,22 @@ func (r *Repository) GetServiceByType(deliveryType string) (ds.TransportService,
 	}
 	
 	if id, exists := typeMap[deliveryType]; exists {
-		return r.GetService(id)
+		return r.GetTransportService(id)
 	}
 	
 	return ds.TransportService{}, fmt.Errorf("тип доставки не найден")
 }
 
-// CRUD для Service
-func (r *Repository) CreateService(s *ds.TransportService) error {
+// CRUD для TransportService
+func (r *Repository) CreateTransportService(s *ds.TransportService) error {
     return r.db.Create(s).Error
 }
 
-func (r *Repository) UpdateService(s *ds.TransportService) error {
+func (r *Repository) UpdateTransportService(s *ds.TransportService) error {
     return r.db.Save(s).Error
 }
 
-func (r *Repository) DeleteService(id int) error {
+func (r *Repository) DeleteTransportService(id int) error {
     return r.db.Delete(&ds.TransportService{}, id).Error
 }
 
@@ -186,13 +186,13 @@ func (r *Repository) createCargoLogisticRequestTx(items []CargoLogisticRequestIt
         totalHeight := 0.0
 
         for _, it := range items {
-            svc, err := r.GetService(it.TransportServiceID)
+            svc, err := r.GetTransportService(it.TransportServiceID)
             if err != nil {
                 return fmt.Errorf("service %d not found", it.TransportServiceID)
             }
             res := calc.CalculateDelivery(svc, it.FromCity, it.ToCity, it.Length, it.Width, it.Height, it.Weight)
             if !res.IsValid {
-                return fmt.Errorf(res.ErrorMessage)
+                return fmt.Errorf("%s", res.ErrorMessage)
             }
 
             // создаём строку заказа
@@ -459,7 +459,7 @@ func (r *Repository) AddServiceToLogisticRequest(orderID, serviceID int) error {
     }
     
     // Проверяем услугу
-    _, err = r.GetService(serviceID)
+    _, err = r.GetTransportService(serviceID)
     if err != nil {
         return fmt.Errorf("услуга не найдена")
     }
@@ -509,8 +509,8 @@ func (r *Repository) UpdateLogisticRequestService(orderID, serviceID int, quanti
 }
 
 
-// AddToCart - добавление услуги в корзину
-func (r *Repository) ensureDraftLogisticRequest(sessionID string) (int, error) {
+// ensureGuestDraftLogisticRequest - гарантирует наличие черновика логистической заявки для sessionID (guest/web)
+func (r *Repository) ensureGuestDraftLogisticRequest(sessionID string) (int, error) {
     var order ds.LogisticRequest
     if err := r.db.Where("session_id = ? AND is_draft = ? AND deleted_at IS NULL", sessionID, true).First(&order).Error; err != nil {
         // создаём с системным создателем
@@ -527,13 +527,14 @@ func (r *Repository) ensureDraftLogisticRequest(sessionID string) (int, error) {
     return order.ID, nil
 }
 
-func (r *Repository) AddToCart(serviceID int) error {
+// AddTransportServiceToGuestDraftLogisticRequest - добавляет транспортную услугу в черновик заявки (guest)
+func (r *Repository) AddTransportServiceToGuestDraftLogisticRequest(serviceID int) error {
     // проверяем услугу
-    if _, err := r.GetService(serviceID); err != nil {
+    if _, err := r.GetTransportService(serviceID); err != nil {
         return fmt.Errorf("услуга не найдена")
     }
-    // берём черновой заказ как корзину
-    orderID, err := r.ensureDraftLogisticRequest("guest")
+    // берём черновик логистической заявки
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
     if err != nil { return err }
 
     // upsert в logistic_request_services
@@ -548,16 +549,16 @@ func (r *Repository) AddToCart(serviceID int) error {
     return err
 }
 
-// RemoveFromCart - удаление услуги из корзины
-func (r *Repository) RemoveFromCart(serviceID int) error {
-    orderID, err := r.ensureDraftLogisticRequest("guest")
+// RemoveTransportServiceFromGuestDraftLogisticRequest - уменьшает количество услуги в черновике или удаляет строку
+func (r *Repository) RemoveTransportServiceFromGuestDraftLogisticRequest(serviceID int) error {
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
     if err != nil { return err }
 
     sqlDB, err := r.db.DB(); if err != nil { return err }
     // уменьшаем qty если >1, иначе удаляем
     var qty int
     err = sqlDB.QueryRow(`SELECT quantity FROM logistic_request_services WHERE logistic_request_id=$1 AND transport_service_id=$2`, orderID, serviceID).Scan(&qty)
-    if err == sql.ErrNoRows { return fmt.Errorf("услуга не найдена в корзине") }
+    if err == sql.ErrNoRows { return fmt.Errorf("услуга не найдена в черновике заявки") }
     if err != nil { return err }
 
     if qty > 1 {
@@ -568,46 +569,46 @@ func (r *Repository) RemoveFromCart(serviceID int) error {
     return err
 }
 
-// GetCart - получение корзины
-func (r *Repository) GetCart() (ds.Cart, error) {
-    orderID, err := r.ensureDraftLogisticRequest("guest")
-    if err != nil { return ds.Cart{}, err }
-    var items []ds.CartService
+// GetGuestDraftLogisticRequestView - получение представления черновика заявки (guest)
+func (r *Repository) GetGuestDraftLogisticRequestView() (ds.DraftLogisticRequest, error) {
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
+    if err != nil { return ds.DraftLogisticRequest{}, err }
+    var items []ds.DraftLogisticRequestService
     if err := r.db.Where("logistic_request_id = ?", orderID).Find(&items).Error; err != nil {
-        return ds.Cart{}, err
+        return ds.DraftLogisticRequest{}, err
     }
-    return ds.Cart{ID: orderID, SessionID: "guest", IsDraft: true, Services: items}, nil
+    return ds.DraftLogisticRequest{ID: orderID, SessionID: "guest", IsDraft: true, Services: items}, nil
 }
 
-// GetCartServices - получение услуг в корзине с полной информацией
-func (r *Repository) GetCartServices() ([]ds.TransportService, error) {
-    orderID, err := r.ensureDraftLogisticRequest("guest")
+// GetGuestDraftLogisticRequestServices - услуги в черновике заявки (guest) с полной информацией
+func (r *Repository) GetGuestDraftLogisticRequestServices() ([]ds.TransportService, error) {
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
     if err != nil { 
-        logrus.Errorf("GetCartServices: failed to ensure draft request: %v", err)
+        logrus.Errorf("GetGuestDraftLogisticRequestServices: failed to ensure draft request: %v", err)
         return nil, err 
     }
-    var items []ds.CartService
+    var items []ds.DraftLogisticRequestService
     if err := r.db.Where("logistic_request_id = ?", orderID).Find(&items).Error; err != nil { 
-        logrus.Errorf("GetCartServices: failed to find cart items: %v", err)
+        logrus.Errorf("GetGuestDraftLogisticRequestServices: failed to find draft items: %v", err)
         return nil, err 
     }
-    logrus.Infof("GetCartServices: found %d items in cart for orderID %d", len(items), orderID)
+    logrus.Infof("GetGuestDraftLogisticRequestServices: found %d items in draft for requestID %d", len(items), orderID)
     services := make([]ds.TransportService, 0, len(items))
     for _, it := range items {
-        s, err := r.GetService(it.TransportServiceID)
+        s, err := r.GetTransportService(it.TransportServiceID)
         if err != nil {
-            logrus.Errorf("GetCartServices: failed to get service %d: %v", it.TransportServiceID, err)
+            logrus.Errorf("GetGuestDraftLogisticRequestServices: failed to get service %d: %v", it.TransportServiceID, err)
         } else {
             services = append(services, s)
         }
     }
-    logrus.Infof("GetCartServices: returning %d services", len(services))
+    logrus.Infof("GetGuestDraftLogisticRequestServices: returning %d services", len(services))
     return services, nil
 }
 
-// GetCartCount - получение общего количества услуг в корзине
-func (r *Repository) GetCartCount() int {
-    orderID, err := r.ensureDraftLogisticRequest("guest")
+// GetGuestDraftLogisticRequestServiceCount - общее количество услуг в черновике заявки (guest)
+func (r *Repository) GetGuestDraftLogisticRequestServiceCount() int {
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
     if err != nil { return 0 }
     sqlDB, err := r.db.DB(); if err != nil { return 0 }
     var count sql.NullInt64
@@ -616,11 +617,11 @@ func (r *Repository) GetCartCount() int {
     return 0
 }
 
-// ClearCart - очистка корзины
-func (r *Repository) ClearCart() {
-    orderID, err := r.ensureDraftLogisticRequest("guest")
+// ClearGuestDraftLogisticRequest - очистка черновика заявки (guest) (удаление всех строк услуг)
+func (r *Repository) ClearGuestDraftLogisticRequest() {
+    orderID, err := r.ensureGuestDraftLogisticRequest("guest")
     if err != nil { return }
-    r.db.Where("logistic_request_id = ?", orderID).Delete(&ds.CartService{})
+    r.db.Where("logistic_request_id = ?", orderID).Delete(&ds.DraftLogisticRequestService{})
 }
 
 // UpdateLogisticRequestStatusWithCursor - обновление статуса заказа через курсор без ORM

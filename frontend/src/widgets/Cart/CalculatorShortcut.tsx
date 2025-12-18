@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 /**
- * Кнопка калькулятора/корзины как в шаблоне index.html
+ * Кнопка перехода к расчёту перевозки / черновику заявки
  * Справа вверху, с бэйджем количества
  */
 export function CalculatorShortcut() {
@@ -11,19 +11,18 @@ export function CalculatorShortcut() {
   useEffect(() => {
     const load = async () => {
       try {
-        // Совместимость: пробуем /api/cart (вернет id и count) и /api/cart/count
-        const res = await fetch('/api/cart');
+        const res = await fetch('/api/logistic-requests/draft');
         if (res.ok) {
           const data = await res.json();
           const c = typeof data?.count === 'number' ? data.count : 0;
-          const id = data?.cart?.id || data?.id || null;
+          const id = data?.draft_logistic_request?.id ?? null;
           setCount(c);
           setLogisticRequestId(id);
           return;
         }
       } catch {}
       try {
-        const res2 = await fetch('/api/cart/count');
+        const res2 = await fetch('/api/logistic-requests/draft/count');
         if (res2.ok) {
           const data2 = await res2.json();
           setCount(typeof data2?.count === 'number' ? data2.count : 0);
@@ -33,19 +32,19 @@ export function CalculatorShortcut() {
     load();
   }, []);
 
-  const href = logisticRequestId ? `/calculator?request_id=${logisticRequestId}` : '/calculator';
+  const href = logisticRequestId ? `/delivery-quote?request_id=${logisticRequestId}` : '/delivery-quote';
   const isDisabled = count <= 0;
 
   return (
     <div className="calculator-shortcut">
       {isDisabled ? (
         <a className="calculator-btn is-disabled" aria-disabled="true">
-          🧮 Калькулятор
+          🧮 Расчёт перевозки
           <span className="cart-count" id="cartCount">{count || ''}</span>
         </a>
       ) : (
         <a href={href} className="calculator-btn" style={{ textDecoration: 'none' }}>
-          🧮 Калькулятор
+          🧮 Расчёт перевозки
           <span className="cart-count" id="cartCount">{count}</span>
         </a>
       )}

@@ -28,7 +28,7 @@
 
         <!-- Поиск -->
         <div class="search-section">
-            <form class="search-form" method="POST" action="/api/searchtrans">
+            <form class="search-form" method="POST" action="/api/transport-services/search">
                 <input 
                     type="text" 
                     name="search_query" 
@@ -51,7 +51,7 @@
                     <h3 class="service-title">{{ .Name }}</h3>
                     <p class="service-description">{{ .Description }}</p>
                     <div class="service-actions">
-                        <a href="/service/{{ .ID }}" class="details-link">подробнее</a>
+                        <a href="/transport-services/{{ .ID }}" class="details-link">подробнее</a>
                         <button class="consult-btn" data-service-id="{{.ID}}">Получить консультацию</button>
                     </div>
                 </div>
@@ -69,9 +69,9 @@
 
     <script>
         // Функция для добавления услуги в корзину
-        async function addToCart(serviceId) {
+        async function addTransportServiceToDraftLogisticRequest(serviceId) {
             try {
-                const response = await fetch(`/api/cart/add/${serviceId}`, {
+                const response = await fetch(`/api/logistic-requests/draft/services/${serviceId}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -99,7 +99,7 @@
         // Функция для обновления счетчика корзины
         function updateCartCount(count, cartId) {
             const cartCountElement = document.getElementById('cartCount');
-            toggleCalculatorBtn(count, cartId);
+            toggleDeliveryQuoteBtn(count, cartId);
             if (cartCountElement) {
                 if (count > 0) {
                     cartCountElement.textContent = count;
@@ -154,7 +154,7 @@
         // Загружаем количество в корзине при загрузке страницы
         async function loadCartCount() {
             try {
-                const response = await fetch('/api/cart');
+                const response = await fetch('/api/logistic-requests/draft');
                 const data = await response.json();
                 const cartId = data?.cart?.id || data?.id || undefined;
                 const count = data?.count ?? 0;
@@ -170,7 +170,7 @@
             if (e.target.classList.contains('consult-btn')) {
                 const serviceId = e.target.getAttribute('data-service-id');
                 if (serviceId) {
-                    addToCart(parseInt(serviceId));
+                    addTransportServiceToDraftLogisticRequest(parseInt(serviceId));
                 }
             }
         });
@@ -179,13 +179,13 @@
         document.addEventListener('DOMContentLoaded', loadCartCount);
 
         // Переключение доступности кнопки калькулятора в зависимости от количества в корзине
-        function toggleCalculatorBtn(count, cartId) {
+        function toggleDeliveryQuoteBtn(count, cartId) {
             const btn = document.getElementById('calculatorBtn');
             if (!btn) return;
             if (count > 0) {
                 btn.classList.remove('is-disabled');
                 btn.setAttribute('aria-disabled', 'false');
-                const href = cartId ? `/calculator?request_id=${cartId}` : '/calculator';
+                const href = cartId ? `/delivery-quote?request_id=${cartId}` : '/delivery-quote';
                 btn.setAttribute('href', href);
                 btn.style.pointerEvents = 'auto';
                 btn.style.backgroundColor = '';

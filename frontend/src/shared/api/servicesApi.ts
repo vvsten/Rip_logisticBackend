@@ -30,9 +30,14 @@ function convertService(raw: TransportServiceRaw): TransportService {
       } else {
         // Для веб-версии используем относительный путь через прокси бэкенда
         // Бэкенд проксирует /lab1/* к MinIO
-        // Учитываем base path для GitHub Pages
-        const baseUrl = import.meta.env.BASE_URL || '/';
-        imageUrl = `${baseUrl}${imagePath.replace(/^\//, '')}`;
+        // В DEV нельзя префиксить BASE_URL (иначе получаем /RIP-2-mod-/lab1/... -> 404)
+        // В PROD (GitHub Pages) наоборот нужен BASE_URL.
+        if (import.meta.env.DEV) {
+          imageUrl = imagePath; // например: /lab1/fura.jpg
+        } else {
+          const baseUrl = import.meta.env.BASE_URL || '/';
+          imageUrl = `${baseUrl}${imagePath.replace(/^\//, '')}`;
+        }
         console.log(`[Web] Converted image URL: ${raw.image_url} -> ${imageUrl}`);
       }
     }
@@ -206,9 +211,11 @@ export async function fetchTransportServices(filters: TransportServiceFilters = 
     
     const data = await response.json();
     
-    // Если ответ содержит поле services, берем его
+    // Бэкенд может вернуть либо transport_services (доменно), либо services (старый формат)
     let services: TransportServiceRaw[] = [];
-    if (data.services && Array.isArray(data.services)) {
+    if (data.transport_services && Array.isArray(data.transport_services)) {
+      services = data.transport_services;
+    } else if (data.services && Array.isArray(data.services)) {
       services = data.services;
     } else if (Array.isArray(data)) {
       services = data;

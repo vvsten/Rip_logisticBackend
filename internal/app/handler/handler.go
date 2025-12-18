@@ -37,11 +37,11 @@ func fail(ctx *gin.Context, code int, message string) {
     })
 }
 
-// GetServices - главная страница со списком услуг
-func (h *Handler) GetServices(ctx *gin.Context) {
+// GetTransportServicesPage - главная страница со списком транспортных услуг
+func (h *Handler) GetTransportServicesPage(ctx *gin.Context) {
 	search := ctx.Query("search") // получаем параметр поиска из URL
 	
-	services, err := h.Repository.GetServices(search)
+	services, err := h.Repository.GetTransportServices(search)
 	if err != nil {
 		logrus.Error(err)
 		ctx.HTML(http.StatusInternalServerError, "error.html", gin.H{
@@ -56,19 +56,19 @@ func (h *Handler) GetServices(ctx *gin.Context) {
 	})
 }
 
-// GetService - страница с подробной информацией об услуге
-func (h *Handler) GetService(ctx *gin.Context) {
+// GetTransportServicePage - страница с подробной информацией о транспортной услуге
+func (h *Handler) GetTransportServicePage(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		logrus.Error(err)
 		ctx.HTML(http.StatusBadRequest, "error.html", gin.H{
-			"error": "Неверный ID услуги",
+			"error": "Неверный ID транспортной услуги",
 		})
 		return
 	}
 
-	service, err := h.Repository.GetService(id)
+	service, err := h.Repository.GetTransportService(id)
 	if err != nil {
 		logrus.Error(err)
 		ctx.HTML(http.StatusNotFound, "error.html", gin.H{
@@ -82,11 +82,11 @@ func (h *Handler) GetService(ctx *gin.Context) {
 	})
 }
 
-// GetLogisticRequestDetails - страница с деталями заявки
-func (h *Handler) GetLogisticRequestDetails(ctx *gin.Context) {
+// GetLogisticRequestDetailsPage - страница с деталями логистической заявки
+func (h *Handler) GetLogisticRequestDetailsPage(ctx *gin.Context) {
 	// Получаем первую сформированную заявку для демонстрации
-	orders, err := h.Repository.GetLogisticRequests("formed", nil, nil)
-	if err != nil || len(orders) == 0 {
+	logisticRequests, err := h.Repository.GetLogisticRequests("formed", nil, nil)
+	if err != nil || len(logisticRequests) == 0 {
 		logrus.Error(err)
 		ctx.HTML(http.StatusInternalServerError, "error.html", gin.H{
 			"error": "Ошибка загрузки заявки",
@@ -94,23 +94,23 @@ func (h *Handler) GetLogisticRequestDetails(ctx *gin.Context) {
 		return
 	}
 
-	order := orders[0]
-	ctx.HTML(http.StatusOK, "order.html", gin.H{
-		"order":    order,
-		"services": order.Services,
+	logisticRequest := logisticRequests[0]
+	ctx.HTML(http.StatusOK, "logistic_request.html", gin.H{
+		"logistic_request": logisticRequest,
+		"services":         logisticRequest.Services,
 	})
 }
 
-// GetCalculator - страница калькулятора
-func (h *Handler) GetCalculator(ctx *gin.Context) {
-	// Получаем услуги из корзины
-	cartServices, err := h.Repository.GetCartServices()
+// GetDeliveryQuotePage - страница расчёта стоимости/сроков грузоперевозки
+func (h *Handler) GetDeliveryQuotePage(ctx *gin.Context) {
+	// Получаем услуги из черновика логистической заявки
+	draftServices, err := h.Repository.GetGuestDraftLogisticRequestServices()
 	if err != nil {
-		logrus.Errorf("Error getting cart services: %v", err)
-		cartServices = []ds.TransportService{}
+		logrus.Errorf("Error getting draft logistic request services: %v", err)
+		draftServices = []ds.TransportService{}
 	}
 	
-	logrus.Infof("GetCalculator: found %d services in cart", len(cartServices))
+	logrus.Infof("GetDeliveryQuotePage: found %d transport services in draft logistic request", len(draftServices))
 
 	ctx.HTML(http.StatusOK, "calculator.html", gin.H{
 		"FromCity":     "",
@@ -122,12 +122,12 @@ func (h *Handler) GetCalculator(ctx *gin.Context) {
 		"DeliveryType": "",
 		"DeliveryDays": 0,
 		"TotalCost":    0,
-		"CartServices": cartServices,
+		"CartServices": draftServices,
 	})
 }
 
-// PostCalculator - обработка формы калькулятора
-func (h *Handler) PostCalculator(ctx *gin.Context) {
+// PostDeliveryQuote - обработка формы расчёта грузоперевозки
+func (h *Handler) PostDeliveryQuote(ctx *gin.Context) {
 	// Получаем данные из формы
 	fromCity := ctx.PostForm("from_city")
 	toCity := ctx.PostForm("to_city")
@@ -146,7 +146,7 @@ func (h *Handler) PostCalculator(ctx *gin.Context) {
 	// Получаем услугу по типу доставки
 	var selectedService ds.TransportService
 	if deliveryType != "" {
-		service, err := h.Repository.GetServiceByType(deliveryType)
+		service, err := h.Repository.GetTransportServiceByDeliveryType(deliveryType)
 		if err == nil {
 			selectedService = service
 		}
@@ -248,71 +248,70 @@ func calculateDistance(fromCity, toCity string) float64 {
 	return 500.0
 }
 
-// AddToCart - добавление услуги в корзину
-func (h *Handler) AddToCart(ctx *gin.Context) {
-	serviceIDStr := ctx.Param("id")
+// AddTransportServiceToDraftLogisticRequest - добавление услуги в черновик логистической заявки
+func (h *Handler) AddTransportServiceToDraftLogisticRequest(ctx *gin.Context) {
+	serviceIDStr := ctx.Param("service_id")
 	serviceID, err := strconv.Atoi(serviceIDStr)
 	if err != nil {
         fail(ctx, http.StatusBadRequest, "invalid service id, must be integer >= 0")
 		return
 	}
 
-    err = h.Repository.AddToCart(serviceID)
+    err = h.Repository.AddTransportServiceToGuestDraftLogisticRequest(serviceID)
 	if err != nil {
         fail(ctx, http.StatusNotFound, err.Error())
 		return
 	}
 
-	// Возвращаем обновленное количество в корзине
-	count := h.Repository.GetCartCount()
+	// Возвращаем обновленное количество услуг в черновике
+	count := h.Repository.GetGuestDraftLogisticRequestServiceCount()
 	ctx.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"count":   count,
-		"message": "Услуга добавлена в корзину",
+		"message": "Транспортная услуга добавлена в черновик заявки",
 	})
 }
 
-// RemoveFromCart - удаление всей заявки (корзины) по ID
-func (h *Handler) RemoveFromCart(ctx *gin.Context) {
-    // Очищаем текущую гостевую корзину независимо от order_id в URL
-    h.Repository.ClearCart()
+// ClearDraftLogisticRequest - очистка черновика логистической заявки (guest)
+func (h *Handler) ClearDraftLogisticRequest(ctx *gin.Context) {
+    h.Repository.ClearGuestDraftLogisticRequest()
 
     ctx.JSON(http.StatusOK, gin.H{
         "success": true,
         "count":   0,
-        "message": "Корзина очищена",
+        "message": "Черновик логистической заявки очищен",
     })
 }
 
-// GetCart - получение корзины
-func (h *Handler) GetCart(ctx *gin.Context) {
-    cart, err := h.Repository.GetCart()
+// GetDraftLogisticRequest - получение черновика логистической заявки (guest)
+func (h *Handler) GetDraftLogisticRequest(ctx *gin.Context) {
+    draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
 	if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get cart")
+        fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
 		return
 	}
 
-    services, err := h.Repository.GetCartServices()
+    services, err := h.Repository.GetGuestDraftLogisticRequestServices()
 	if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get services in cart")
+        fail(ctx, http.StatusInternalServerError, "failed to get transport services in draft logistic request")
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"cart":     cart,
+		"draft_logistic_request": draftRequest,
 		"services": services,
-		"count":    h.Repository.GetCartCount(),
+		"count":    h.Repository.GetGuestDraftLogisticRequestServiceCount(),
 	})
 }
 
-// GetCartCount - получение количества услуг в корзине
-func (h *Handler) GetCartCount(ctx *gin.Context) {
-	count := h.Repository.GetCartCount()
+// GetDraftLogisticRequestServiceCount - получение количества услуг в черновике заявки
+func (h *Handler) GetDraftLogisticRequestServiceCount(ctx *gin.Context) {
+	count := h.Repository.GetGuestDraftLogisticRequestServiceCount()
 	ctx.JSON(http.StatusOK, gin.H{"count": count})
 }
 
-// CalculateService - расчет стоимости грузоперевозки для конкретного типа транспорта
-func (h *Handler) CalculateService(ctx *gin.Context) {
+// CalculateLogisticRequestQuote - расчет стоимости/сроков грузоперевозки по параметрам груза
+func (h *Handler) CalculateLogisticRequestQuote(ctx *gin.Context) {
 	var request struct {
 		TransportServiceID int     `json:"service_id" form:"service_id"`
 		FromCity  string  `json:"from_city" form:"from_city"`
@@ -332,7 +331,7 @@ func (h *Handler) CalculateService(ctx *gin.Context) {
 	}
 
 	// Получаем тип транспорта
-    service, err := h.Repository.GetService(request.TransportServiceID)
+    service, err := h.Repository.GetTransportService(request.TransportServiceID)
 	if err != nil {
         fail(ctx, http.StatusNotFound, "transport type not found")
 		return
@@ -361,7 +360,7 @@ func (h *Handler) FormLogisticRequest(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		fail(ctx, http.StatusBadRequest, "invalid order id")
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
 		return
 	}
 
@@ -402,9 +401,9 @@ func (h *Handler) FormLogisticRequest(ctx *gin.Context) {
 	})
 }
 
-// SubmitLogisticRequest - отправка логистической заявки на грузоперевозку
-// @Summary Submit cargo logistic request
-// @Description Submit a new cargo transportation logistic request
+// CreateCargoLogisticRequest - создание (отправка) логистической заявки на грузоперевозку
+// @Summary Create cargo logistic request
+// @Description Create a new cargo transportation logistic request
 // @Tags logistic-requests
 // @Accept json
 // @Produce json
@@ -413,8 +412,8 @@ func (h *Handler) FormLogisticRequest(ctx *gin.Context) {
 // @Success 201 {object} map[string]interface{} "Logistic request submitted successfully"
 // @Failure 400 {object} map[string]string "Invalid request"
 // @Failure 401 {object} map[string]string "Unauthorized"
-// @Router /api/submit-cargo-logistic-request [post]
-func (h *Handler) SubmitLogisticRequest(ctx *gin.Context) {
+// @Router /api/logistic-requests [post]
+func (h *Handler) CreateCargoLogisticRequest(ctx *gin.Context) {
 	userUUID, exists := middleware.GetUserUUID(ctx)
 	if !exists {
 		fail(ctx, http.StatusUnauthorized, "authentication required")
@@ -464,7 +463,7 @@ func (h *Handler) SubmitLogisticRequest(ctx *gin.Context) {
         })
     }
 
-    orderID, err := h.Repository.CreateCargoLogisticRequest(items, user.ID)
+    requestID, err := h.Repository.CreateCargoLogisticRequest(items, user.ID)
     if err != nil {
         // Ошибки валидации калькулятора и пр. вернём как 400
         fail(ctx, http.StatusBadRequest, err.Error())
@@ -475,13 +474,13 @@ func (h *Handler) SubmitLogisticRequest(ctx *gin.Context) {
 		"success":    true,
 		"status":     "success",
 		"message":    "Логистическая заявка успешно оформлена",
-		"request_id": orderID,
+		"request_id": requestID,
         "creator_id": user.ID,
     })
 }
 
-// SearchTransport - поиск транспорта (обработка form data)
-func (h *Handler) SearchTransport(ctx *gin.Context) {
+// SearchTransportServices - поиск транспортных услуг (обработка form data)
+func (h *Handler) SearchTransportServices(ctx *gin.Context) {
 	// Получаем данные из формы
 	searchQuery := ctx.PostForm("search_query")
 	transportType := ctx.PostForm("transport_type")
@@ -503,7 +502,7 @@ func (h *Handler) SearchTransport(ctx *gin.Context) {
 	}
 	
 	// Поиск транспорта
-	services, err := h.Repository.GetServices(searchQuery)
+	services, err := h.Repository.GetTransportServices(searchQuery)
 	if err != nil {
         logrus.Error(err)
         if ctx.GetHeader("Content-Type") == "application/json" {
@@ -548,7 +547,7 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 	orderIDStr := ctx.Param("id")
     orderID, err := strconv.Atoi(orderIDStr)
 	if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id, must be integer >= 0")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id, must be integer >= 0")
 		return
 	}
 
@@ -581,7 +580,7 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
     err = h.Repository.UpdateLogisticRequestStatusWithCursor(orderID, request.Status)
 	if err != nil {
         logrus.Error(err)
-        fail(ctx, http.StatusInternalServerError, "failed to update order status")
+        fail(ctx, http.StatusInternalServerError, "failed to update logistic request status")
 		return
 	}
 
@@ -594,25 +593,25 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 }
 
 // -------------------------
-// CRUD JSON для Service
+// CRUD JSON для TransportService
 // -------------------------
 
-// CreateService - создание типа транспорта
-func (h *Handler) CreateService(ctx *gin.Context) {
+// CreateTransportService - создание типа транспорта
+func (h *Handler) CreateTransportService(ctx *gin.Context) {
     var req ds.TransportService
     if err := ctx.ShouldBindJSON(&req); err != nil {
         fail(ctx, http.StatusBadRequest, "invalid request body")
         return
     }
-    if err := h.Repository.CreateService(&req); err != nil {
+    if err := h.Repository.CreateTransportService(&req); err != nil {
         fail(ctx, http.StatusInternalServerError, "failed to create service")
         return
     }
     ctx.JSON(http.StatusCreated, gin.H{"status": "ok", "service": req})
 }
 
-// UpdateService - обновление типа транспорта
-func (h *Handler) UpdateService(ctx *gin.Context) {
+// UpdateTransportService - обновление типа транспорта
+func (h *Handler) UpdateTransportService(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
@@ -625,37 +624,37 @@ func (h *Handler) UpdateService(ctx *gin.Context) {
         return
     }
     req.ID = id
-    if err := h.Repository.UpdateService(&req); err != nil {
+    if err := h.Repository.UpdateTransportService(&req); err != nil {
         fail(ctx, http.StatusInternalServerError, "failed to update service")
         return
     }
     ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": req})
 }
 
-// DeleteService - удаление типа транспорта
-func (h *Handler) DeleteService(ctx *gin.Context) {
+// DeleteTransportService - удаление типа транспорта
+func (h *Handler) DeleteTransportService(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
         fail(ctx, http.StatusBadRequest, "invalid service id")
         return
     }
-    if err := h.Repository.DeleteService(id); err != nil {
+    if err := h.Repository.DeleteTransportService(id); err != nil {
         fail(ctx, http.StatusInternalServerError, "failed to delete service")
         return
     }
     ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// GetServiceJSON - получение услуги JSON
-func (h *Handler) GetServiceJSON(ctx *gin.Context) {
+// GetTransportService - получение транспортной услуги JSON
+func (h *Handler) GetTransportService(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
         fail(ctx, http.StatusBadRequest, "invalid service id")
         return
     }
-    svc, err := h.Repository.GetService(id)
+    svc, err := h.Repository.GetTransportService(id)
     if err != nil {
         fail(ctx, http.StatusNotFound, "service not found")
         return
@@ -663,9 +662,9 @@ func (h *Handler) GetServiceJSON(ctx *gin.Context) {
     ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": svc})
 }
 
-// GetAllServicesJSON - получение всех услуг в JSON с фильтрацией
+// GetTransportServices - получение всех транспортных услуг в JSON с фильтрацией
 // Поддерживает фильтрацию по search, minPrice, maxPrice, dateFrom, dateTo
-func (h *Handler) GetAllServicesJSON(ctx *gin.Context) {
+func (h *Handler) GetTransportServices(ctx *gin.Context) {
     // Получаем параметры запроса из URL
     search := ctx.Query("search")
     
@@ -702,14 +701,14 @@ func (h *Handler) GetAllServicesJSON(ctx *gin.Context) {
     }
     
     // Получаем отфильтрованные услуги из репозитория
-    services, err := h.Repository.GetServicesWithFilters(search, minPrice, maxPrice, dateFrom, dateTo)
+    services, err := h.Repository.GetTransportServicesWithFilters(search, minPrice, maxPrice, dateFrom, dateTo)
     if err != nil {
         logrus.Error("Error getting services:", err)
         fail(ctx, http.StatusInternalServerError, "failed to get services")
         return
     }
     
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "services": services})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "transport_services": services})
 }
 
 // ==================== ПОЛЬЗОВАТЕЛИ ====================
@@ -979,9 +978,9 @@ func (h *Handler) GetLogisticRequests(ctx *gin.Context) {
         }
     }
 
-    orders, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
+    logisticRequests, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
     if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get orders")
+        fail(ctx, http.StatusInternalServerError, "failed to get logistic requests")
         return
     }
 
@@ -995,16 +994,16 @@ func (h *Handler) GetLogisticRequests(ctx *gin.Context) {
         }
         
         var userLogisticRequests []ds.LogisticRequest
-        for _, order := range orders {
-            if order.CreatorID == user.ID {
-                userLogisticRequests = append(userLogisticRequests, order)
+        for _, lr := range logisticRequests {
+            if lr.CreatorID == user.ID {
+                userLogisticRequests = append(userLogisticRequests, lr)
             }
         }
-        orders = userLogisticRequests
+        logisticRequests = userLogisticRequests
     }
     // Manager и Admin видят все заявки
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "orders": orders})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
 }
 
 // GetLogisticRequest - получение заявки по ID
@@ -1012,17 +1011,17 @@ func (h *Handler) GetLogisticRequest(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
 
-    order, err := h.Repository.GetLogisticRequest(id)
+    logisticRequest, err := h.Repository.GetLogisticRequest(id)
     if err != nil {
-        fail(ctx, http.StatusNotFound, "order not found")
+        fail(ctx, http.StatusNotFound, "logistic request not found")
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "order": order})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
 }
 
 // UpdateLogisticRequest - обновление заявки
@@ -1030,7 +1029,7 @@ func (h *Handler) UpdateLogisticRequest(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
 
@@ -1048,42 +1047,42 @@ func (h *Handler) UpdateLogisticRequest(ctx *gin.Context) {
         return
     }
 
-    order, err := h.Repository.GetLogisticRequest(id)
+    logisticRequest, err := h.Repository.GetLogisticRequest(id)
     if err != nil {
-        fail(ctx, http.StatusNotFound, "order not found")
+        fail(ctx, http.StatusNotFound, "logistic request not found")
         return
     }
 
-    if order.Status != ds.StatusDraft {
-        fail(ctx, http.StatusBadRequest, "can only update draft orders")
+    if logisticRequest.Status != ds.StatusDraft {
+        fail(ctx, http.StatusBadRequest, "can only update draft logistic requests")
         return
     }
 
     if req.FromCity != "" {
-        order.FromCity = req.FromCity
+        logisticRequest.FromCity = req.FromCity
     }
     if req.ToCity != "" {
-        order.ToCity = req.ToCity
+        logisticRequest.ToCity = req.ToCity
     }
     if req.Weight > 0 {
-        order.Weight = req.Weight
+        logisticRequest.Weight = req.Weight
     }
     if req.Length > 0 {
-        order.Length = req.Length
+        logisticRequest.Length = req.Length
     }
     if req.Width > 0 {
-        order.Width = req.Width
+        logisticRequest.Width = req.Width
     }
     if req.Height > 0 {
-        order.Height = req.Height
+        logisticRequest.Height = req.Height
     }
 
-    if err := h.Repository.UpdateLogisticRequest(&order); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to update order")
+    if err := h.Repository.UpdateLogisticRequest(&logisticRequest); err != nil {
+        fail(ctx, http.StatusInternalServerError, "failed to update logistic request")
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "order": order})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
 }
 
 
@@ -1106,7 +1105,7 @@ func (h *Handler) CompleteLogisticRequest(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
 
@@ -1150,32 +1149,31 @@ func (h *Handler) DeleteLogisticRequest(ctx *gin.Context) {
     idStr := ctx.Param("id")
     id, err := strconv.Atoi(idStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
 
     err = h.Repository.DeleteLogisticRequest(id)
     if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to delete order")
+        fail(ctx, http.StatusInternalServerError, "failed to delete logistic request")
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "order deleted successfully"})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request deleted successfully"})
 }
 
-// GetCartIcon - получение иконки корзины
-func (h *Handler) GetCartIcon(ctx *gin.Context) {
-    // Используем ту же логику, что и GetCart - для гостевой корзины
-    cart, err := h.Repository.GetCart()
+// GetDraftLogisticRequestIcon - получение счетчика/ID черновика заявки (для иконки)
+func (h *Handler) GetDraftLogisticRequestIcon(ctx *gin.Context) {
+    draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
     if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get cart")
+        fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
         return
     }
 
-    count := h.Repository.GetCartCount()
+    count := h.Repository.GetGuestDraftLogisticRequestServiceCount()
     ctx.JSON(http.StatusOK, gin.H{
 		"status":     "ok",
-		"request_id": cart.ID,
+		"request_id": draftRequest.ID,
 		"count":      count,
     })
 }
@@ -1200,7 +1198,7 @@ func (h *Handler) AddServiceToLogisticRequest(ctx *gin.Context) {
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "service added to order"})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service added to logistic request"})
 }
 
 // RemoveServiceFromLogisticRequest - удаление услуги из заявки
@@ -1210,7 +1208,7 @@ func (h *Handler) RemoveServiceFromLogisticRequest(ctx *gin.Context) {
     
     orderID, err := strconv.Atoi(orderIDStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
     
@@ -1226,7 +1224,7 @@ func (h *Handler) RemoveServiceFromLogisticRequest(ctx *gin.Context) {
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "service removed from order"})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service removed from logistic request"})
 }
 
 // UpdateLogisticRequestService - обновление м-м
@@ -1236,7 +1234,7 @@ func (h *Handler) UpdateLogisticRequestService(ctx *gin.Context) {
     
     orderID, err := strconv.Atoi(orderIDStr)
     if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid order id")
+        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
         return
     }
     
@@ -1248,7 +1246,7 @@ func (h *Handler) UpdateLogisticRequestService(ctx *gin.Context) {
 
     var req struct {
         Quantity int    `json:"quantity" binding:"required,min=1"`
-        LogisticRequest    int    `json:"order"`
+        SortOrder int    `json:"sort_order"`
         Comment  string `json:"comment"`
     }
 
@@ -1257,11 +1255,11 @@ func (h *Handler) UpdateLogisticRequestService(ctx *gin.Context) {
         return
     }
 
-    err = h.Repository.UpdateLogisticRequestService(orderID, serviceID, req.Quantity, req.LogisticRequest, req.Comment)
+    err = h.Repository.UpdateLogisticRequestService(orderID, serviceID, req.Quantity, req.SortOrder, req.Comment)
     if err != nil {
         fail(ctx, http.StatusBadRequest, err.Error())
         return
     }
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "order service updated"})
+    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request service updated"})
 }
