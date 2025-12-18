@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import type { TransportService } from '../../shared/types/TransportService';
 
 /**
@@ -22,6 +23,30 @@ export function ServiceCard({ service }: ServiceCardProps) {
   // URL изображения по умолчанию если поле пустое
   const defaultImageUrl = `${baseUrl}assets/default.svg`;
   const imageUrl = service.imageUrl || defaultImageUrl;
+
+  const [isAdding, setIsAdding] = useState(false);
+  const addButtonLabel = useMemo(() => {
+    if (isAdding) return 'Добавляем...';
+    return 'Добавить в заявку';
+  }, [isAdding]);
+
+  const handleAddToDraft = async () => {
+    if (isAdding) return;
+    setIsAdding(true);
+    try {
+      const res = await fetch(`/api/logistic-requests/draft/services/${service.id}`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      // Сообщаем шапке/виджету, что черновик обновился
+      window.dispatchEvent(new Event('draft-logistic-request-updated'));
+    } catch (e) {
+      console.error('Failed to add transport service to draft logistic request:', e);
+      alert('Не удалось добавить услугу в черновик заявки');
+    } finally {
+      setIsAdding(false);
+    }
+  };
   
   return (
     <div className="service-card">
@@ -39,8 +64,15 @@ export function ServiceCard({ service }: ServiceCardProps) {
         <p className="service-description">{service.description}</p>
         <div className="service-actions">
           <a href={`#service-${service.id}`} className="details-link">подробнее</a>
-          <button className="consult-btn" data-service-id={service.id}>
-            Получить консультацию
+          <button
+            type="button"
+            className="consult-btn"
+            data-service-id={service.id}
+            onClick={handleAddToDraft}
+            disabled={isAdding}
+            aria-disabled={isAdding}
+          >
+            {addButtonLabel}
           </button>
         </div>
       </div>

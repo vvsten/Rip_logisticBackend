@@ -764,9 +764,13 @@ func (h *Handler) RegisterUser(ctx *gin.Context) {
 
 // GetUserProfile - получение профиля пользователя
 func (h *Handler) GetUserProfile(ctx *gin.Context) {
-    userID := ds.GetCreatorID() // используем системного пользователя
-    
-    user, err := h.Repository.GetUser(userID)
+    userUUID, exists := middleware.GetUserUUID(ctx)
+    if !exists {
+        fail(ctx, http.StatusUnauthorized, "authentication required")
+        return
+    }
+
+    user, err := h.Repository.GetUserByUUID(userUUID)
     if err != nil {
         fail(ctx, http.StatusNotFound, "user not found")
         return
@@ -778,8 +782,6 @@ func (h *Handler) GetUserProfile(ctx *gin.Context) {
 
 // UpdateUserProfile - обновление профиля пользователя
 func (h *Handler) UpdateUserProfile(ctx *gin.Context) {
-    userID := ds.GetCreatorID()
-    
     var req struct {
         Name  string `json:"name"`
         Phone string `json:"phone"`
@@ -791,7 +793,13 @@ func (h *Handler) UpdateUserProfile(ctx *gin.Context) {
         return
     }
 
-    user, err := h.Repository.GetUser(userID)
+    userUUID, exists := middleware.GetUserUUID(ctx)
+    if !exists {
+        fail(ctx, http.StatusUnauthorized, "authentication required")
+        return
+    }
+
+    user, err := h.Repository.GetUserByUUID(userUUID)
     if err != nil {
         fail(ctx, http.StatusNotFound, "user not found")
         return
@@ -1176,6 +1184,120 @@ func (h *Handler) GetDraftLogisticRequestIcon(ctx *gin.Context) {
 		"request_id": draftRequest.ID,
 		"count":      count,
     })
+}
+
+// ==================== USER DRAFT (auth) ====================
+// Эти endpoints нужны именно для React-интерфейса лаб7: у авторизованного пользователя есть свой черновик.
+
+// GetUserDraftIcon - счетчик/ID черновика для иконки (auth)
+func (h *Handler) GetUserDraftIcon(ctx *gin.Context) {
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get user")
+		return
+	}
+
+	orderID, _, err := h.Repository.GetCartIcon(user.ID) // создаёт черновик, если его нет
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft")
+		return
+	}
+
+	count, err := h.Repository.GetLogisticRequestServiceQuantitySum(orderID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft count")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":     "ok",
+		"request_id": orderID,
+		"count":      count,
+	})
+}
+
+// AddTransportServiceToUserDraft - добавление услуги в черновик авторизованного пользователя
+func (h *Handler) AddTransportServiceToUserDraft(ctx *gin.Context) {
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get user")
+		return
+	}
+
+	serviceIDStr := ctx.Param("service_id")
+	serviceID, err := strconv.Atoi(serviceIDStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+
+	orderID, _, err := h.Repository.GetCartIcon(user.ID) // создаёт черновик, если его нет
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft")
+		return
+	}
+
+	if err := h.Repository.AddServiceToLogisticRequest(orderID, serviceID); err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	count, err := h.Repository.GetLogisticRequestServiceQuantitySum(orderID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft count")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":     "ok",
+		"request_id": orderID,
+		"count":      count,
+	})
+}
+
+// ClearUserDraftLogisticRequest - очистка черновика авторизованного пользователя
+func (h *Handler) ClearUserDraftLogisticRequest(ctx *gin.Context) {
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get user")
+		return
+	}
+
+	// Гарантируем наличие черновика, чтобы вернуть request_id
+	orderID, _, err := h.Repository.GetCartIcon(user.ID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft")
+		return
+	}
+
+	if err := h.Repository.ClearUserDraftLogisticRequest(user.ID); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to clear draft")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":     "ok",
+		"request_id": orderID,
+		"count":      0,
+	})
 }
 
 // ==================== М-М ЗАЯВКА-УСЛУГА ====================

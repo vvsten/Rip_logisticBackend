@@ -185,7 +185,7 @@
             if (count > 0) {
                 btn.classList.remove('is-disabled');
                 btn.setAttribute('aria-disabled', 'false');
-                const href = cartId ? `/delivery-quote?request_id=${cartId}` : '/delivery-quote';
+                const href = cartId ? `/logistic-request/quote?request_id=${cartId}` : '/logistic-request/quote';
                 btn.setAttribute('href', href);
                 btn.style.pointerEvents = 'auto';
                 btn.style.backgroundColor = '';

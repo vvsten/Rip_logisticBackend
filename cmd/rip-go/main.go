@@ -60,26 +60,11 @@ func main() {
 		conf.JWTRefreshTokenExpire,
 	)
 
-	// Инициализируем Redis сервис
-	redisService := auth.NewRedisService(
-		conf.RedisHost,
-		conf.RedisPort,
-		conf.RedisPassword,
-		conf.RedisDB,
-	)
-
-	// Проверяем соединение с Redis
-	if err := redisService.Ping(); err != nil {
-		logrus.Warnf("Redis connection failed: %v", err)
-	} else {
-		logrus.Info("Redis connected successfully")
-	}
-
 	// Инициализируем сервис авторизации
-	authService := service.NewAuthService(repo, jwtService, redisService)
+	authService := service.NewAuthService(repo, jwtService)
 
 	// Инициализируем middleware авторизации
-	authMiddleware := middleware.NewAuthMiddleware(jwtService, redisService)
+	authMiddleware := middleware.NewAuthMiddleware(jwtService)
 
 	// Создаем хендлер
 	handler := handler.NewHandler(repo, authService, authMiddleware)
@@ -156,6 +141,7 @@ func main() {
 		   strings.HasPrefix(path, "/lab1") ||
 		   strings.HasPrefix(path, "/swagger") ||
 		   path == "/logistic-request" || 
+		   path == "/logistic-request/quote" ||
 		   path == "/delivery-quote" ||
 		   strings.HasPrefix(path, "/transport-services/") {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -222,8 +208,12 @@ func registerRoutes(r *gin.Engine, handler *handler.Handler) {
 	r.GET("/", handler.GetTransportServicesPage)                                 // Каталог транспортных услуг
 	r.GET("/transport-services/:id", handler.GetTransportServicePage)            // Страница транспортной услуги
 	r.GET("/logistic-request", handler.GetLogisticRequestDetailsPage)            // Демо-страница деталей заявки
-	r.GET("/delivery-quote", handler.GetDeliveryQuotePage)                       // Страница расчёта грузоперевозки
-	r.POST("/delivery-quote", handler.PostDeliveryQuote)                         // Обработка формы расчёта
+	// Страница расчёта грузоперевозки (quote)
+	r.GET("/logistic-request/quote", handler.GetDeliveryQuotePage)
+	r.POST("/logistic-request/quote", handler.PostDeliveryQuote)
+	// Алиас для совместимости
+	r.GET("/delivery-quote", handler.GetDeliveryQuotePage)
+	r.POST("/delivery-quote", handler.PostDeliveryQuote)
 
 	// Черновик логистической заявки (guest) — бывшая "корзина"
 	r.POST("/api/logistic-requests/draft/services/:service_id", handler.AddTransportServiceToDraftLogisticRequest)
@@ -249,7 +239,7 @@ func registerRoutes(r *gin.Engine, handler *handler.Handler) {
     r.POST("/logout", handler.AuthMiddleware.RequireAuth(), handler.LogoutUser)
     r.POST("/refresh", handler.RefreshToken)
 
-    // Пользователи (требуют авторизации)
+    // Пользователи (требуют авторизации)›
     authGroup := r.Group("/api/users")
     authGroup.Use(handler.AuthMiddleware.RequireAuth())
     {
@@ -261,6 +251,11 @@ func registerRoutes(r *gin.Engine, handler *handler.Handler) {
     logisticGroup := r.Group("/api/logistic-requests")
     logisticGroup.Use(handler.AuthMiddleware.RequireAuth())
     {
+		// Черновик заявок авторизованного пользователя (для React UI)
+		logisticGroup.GET("/user-draft/icon", handler.GetUserDraftIcon)
+		logisticGroup.POST("/user-draft/services/:service_id", handler.AddTransportServiceToUserDraft)
+		logisticGroup.DELETE("/user-draft", handler.ClearUserDraftLogisticRequest)
+
 		logisticGroup.POST("", handler.CreateCargoLogisticRequest)
         logisticGroup.GET("", handler.GetLogisticRequests)
         logisticGroup.GET("/:id", handler.GetLogisticRequest)

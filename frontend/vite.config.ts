@@ -73,8 +73,38 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // Auth endpoints (swagger-based): в dev должны проксироваться на бэкенд
+      '/login': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/sign_up': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/logout': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+        ws: true,
+      },
+      '/refresh': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+        ws: true,
+      },
       // Прокси для MinIO изображений через бэкенд
       '/lab1': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+      },
+      // HTML-страницы, которые рендерит бэкенд (не React-роуты!)
+      '/delivery-quote': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+      },
+      '/logistic-request': {
         target: 'http://localhost:8083',
         changeOrigin: true,
       },

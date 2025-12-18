@@ -37,15 +37,8 @@ func StartServer() {
 		conf.JWTRefreshTokenExpire,
 	)
 
-	redisService := auth.NewRedisService(
-		conf.RedisHost,
-		conf.RedisPort,
-		conf.RedisPassword,
-		conf.RedisDB,
-	)
-
-	authService := service.NewAuthService(repo, jwtService, redisService)
-	authMiddleware := middleware.NewAuthMiddleware(jwtService, redisService)
+	authService := service.NewAuthService(repo, jwtService)
+	authMiddleware := middleware.NewAuthMiddleware(jwtService)
 
 	h := handler.NewHandler(repo, authService, authMiddleware)
 
@@ -65,6 +58,10 @@ func StartServer() {
 	r.GET("/", h.GetTransportServicesPage)
 	r.GET("/transport-services/:id", h.GetTransportServicePage)
 	r.GET("/logistic-request", h.GetLogisticRequestDetailsPage)
+	// Страница расчёта грузоперевозки (quote)
+	r.GET("/logistic-request/quote", h.GetDeliveryQuotePage)
+	r.POST("/logistic-request/quote", h.PostDeliveryQuote)
+	// Алиас для совместимости
 	r.GET("/delivery-quote", h.GetDeliveryQuotePage)
 	r.POST("/delivery-quote", h.PostDeliveryQuote)
 

@@ -11,15 +11,14 @@ import (
 
 // AuthMiddleware - middleware для проверки авторизации
 type AuthMiddleware struct {
-	jwtService   *auth.JWTService
-	redisService *auth.RedisService
+	jwtService *auth.JWTService
 }
 
 // NewAuthMiddleware - создание нового middleware
-func NewAuthMiddleware(jwtService *auth.JWTService, redisService *auth.RedisService) *AuthMiddleware {
+// Лаб7/требование: авторизация только по JWT, без Redis-сессий/blacklist.
+func NewAuthMiddleware(jwtService *auth.JWTService) *AuthMiddleware {
 	return &AuthMiddleware{
-		jwtService:   jwtService,
-		redisService: redisService,
+		jwtService: jwtService,
 	}
 }
 
@@ -31,26 +30,6 @@ func (am *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"status":  "error",
 				"message": "Authorization token required",
-			})
-			c.Abort()
-			return
-		}
-
-		// Проверяем токен в blacklist
-		isBlacklisted, err := am.redisService.CheckJWTInBlacklist(token)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to check token blacklist",
-			})
-			c.Abort()
-			return
-		}
-
-		if isBlacklisted {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"status":  "error",
-				"message": "Token has been revoked",
 			})
 			c.Abort()
 			return
@@ -138,26 +117,6 @@ func (am *AuthMiddleware) RequireModerator() gin.HandlerFunc {
 			return
 		}
 
-		// Проверяем токен в blacklist
-		isBlacklisted, err := am.redisService.CheckJWTInBlacklist(token)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "Failed to check token blacklist",
-			})
-			c.Abort()
-			return
-		}
-
-		if isBlacklisted {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"status":  "error",
-				"message": "Token has been revoked",
-			})
-			c.Abort()
-			return
-		}
-
 		// Валидируем токен
 		claims, err := am.jwtService.ValidateToken(token)
 		if err != nil {
@@ -202,13 +161,6 @@ func (am *AuthMiddleware) OptionalAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := am.extractToken(c)
 		if token == "" {
-			c.Next()
-			return
-		}
-
-		// Проверяем токен в blacklist
-		isBlacklisted, err := am.redisService.CheckJWTInBlacklist(token)
-		if err != nil || isBlacklisted {
 			c.Next()
 			return
 		}

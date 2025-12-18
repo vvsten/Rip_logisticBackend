@@ -158,9 +158,9 @@
                     calculateTotalSummary();
                     
                     // Проверяем, есть ли еще услуги
-                    const serviceForms = document.querySelectorAll('.service-calculator-form');
+                    const serviceRows = document.querySelectorAll('.service-row');
                     
-                    if (serviceForms.length === 0) {
+                    if (serviceRows.length === 0) {
                         // Перезагружаем страницу, чтобы показать сообщение "Нет услуг"
                         window.location.reload();
                     }
@@ -343,56 +343,195 @@
             document.getElementById('totalCost').textContent = `${totalCost.toFixed(2)} рублей`;
         }
 
+        async function refreshAccessTokenIfPossible() {
+            const refreshToken = localStorage.getItem('refresh_token');
+            if (!refreshToken) return null;
+
+            try {
+                const res = await fetch('/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refresh_token: refreshToken })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.access_token) {
+                    return null;
+                }
+                localStorage.setItem('access_token', data.access_token);
+                if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                if (data.expires_at) localStorage.setItem('expires_at', data.expires_at);
+                if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
+                return data.access_token;
+            } catch (e) {
+                console.error('refresh token failed:', e);
+                return null;
+            }
+        }
+
+        async function getValidAccessToken() {
+            let token = localStorage.getItem('access_token');
+            if (token) return token;
+            token = await refreshAccessTokenIfPossible();
+            return token;
+        }
+
         // Функция для отправки заявки
-        function submitLogisticRequest() {
-            const serviceForms = document.querySelectorAll('.service-calculator-form');
-            if (serviceForms.length === 0) {
+        async function submitLogisticRequest() {
+            const serviceRows = document.querySelectorAll('.service-row');
+            if (serviceRows.length === 0) {
                 showNotification('Нет услуг для оформления заявки', 'error');
+                return;
+            }
+
+            const fromCity = (document.getElementById('commonFromCity').value || '').trim();
+            const toCity = (document.getElementById('commonToCity').value || '').trim();
+            if (!fromCity || !toCity) {
+                showNotification('Заполните поля "Откуда" и "Куда" перед оформлением', 'error');
                 return;
             }
 
             // Собираем данные со всех форм
             const orderData = [];
-            serviceForms.forEach(serviceForm => {
-                const serviceId = serviceForm.getAttribute('data-service-id');
-                const form = serviceForm;
-                const formData = new FormData(form);
+            serviceRows.forEach(row => {
+                const serviceId = row.getAttribute('data-service-id');
+                const lengthEl = row.querySelector('input[name="length"]');
+                const widthEl = row.querySelector('input[name="width"]');
+                const heightEl = row.querySelector('input[name="height"]');
+                const weightEl = row.querySelector('input[name="weight"]');
+
+                const length = parseFloat(lengthEl?.value) || 0;
+                const width = parseFloat(widthEl?.value) || 0;
+                const height = parseFloat(heightEl?.value) || 0;
+                const weight = parseFloat(weightEl?.value) || 0;
 
                 orderData.push({
                     service_id: parseInt(serviceId),
-                    from_city: document.getElementById('commonFromCity').value,
-                    to_city: document.getElementById('commonToCity').value,
-                    length: parseFloat(formData.get('length')) || 0,
-                    width: parseFloat(formData.get('width')) || 0,
-                    height: parseFloat(formData.get('height')) || 0,
-                    weight: parseFloat(formData.get('weight')) || 0
+                    from_city: fromCity,
+                    to_city: toCity,
+                    length,
+                    width,
+                    height,
+                    weight
                 });
             });
 
-            // Отправляем заявку
-            fetch('/api/logistic-requests', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ services: orderData })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success || data.status === 'success') {
+            // Итоговые параметры для формирования заявки (FormLogisticRequest ожидает общие значения)
+            const totals = orderData.reduce((acc, it) => {
+                acc.weight += it.weight || 0;
+                acc.length += it.length || 0;
+                acc.width += it.width || 0;
+                acc.height += it.height || 0;
+                return acc;
+            }, { weight: 0, length: 0, width: 0, height: 0 });
+
+            if (totals.weight <= 0 || totals.length <= 0 || totals.width <= 0 || totals.height <= 0) {
+                showNotification('Проверьте параметры груза (все значения должны быть > 0)', 'error');
+                return;
+            }
+
+            // Отправляем заявку (JWT-only auth)
+            let token = await getValidAccessToken();
+            if (!token) {
+                showNotification('Для оформления заявки нужно войти (JWT токен не найден)', 'error');
+                return;
+            }
+
+            const doRequest = async (accessToken) => {
+                const response = await fetch('/api/logistic-requests', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${accessToken}`,
+                    },
+                    body: JSON.stringify({ services: orderData })
+                });
+                return response;
+            };
+
+            try {
+                let response = await doRequest(token);
+                if (response.status === 401) {
+                    // access token истёк/невалиден → пробуем обновить и повторить один раз
+                    const newToken = await refreshAccessTokenIfPossible();
+                    if (newToken) {
+                        response = await doRequest(newToken);
+                        token = newToken;
+                    }
+                }
+                const data = await response.json();
+                if (response.ok && (data.success || data.status === 'success')) {
+                    const requestId = data.request_id;
+                    // 1) Пытаемся сформировать заявку, чтобы она появилась в списке (/orders)
+                    // (если формирование не удалось — оставляем черновиком и ведём на страницу заявки)
+                    let formed = false;
+                    try {
+                        let formResp = await fetch(`/api/logistic-requests/${requestId}/form`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`,
+                            },
+                            body: JSON.stringify({
+                                from_city: fromCity,
+                                to_city: toCity,
+                                weight: totals.weight,
+                                length: totals.length,
+                                width: totals.width,
+                                height: totals.height,
+                            }),
+                        });
+                        if (formResp.status === 401) {
+                            const newToken2 = await refreshAccessTokenIfPossible();
+                            if (newToken2) {
+                                token = newToken2;
+                                formResp = await fetch(`/api/logistic-requests/${requestId}/form`, {
+                                    method: 'PUT',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${token}`,
+                                    },
+                                    body: JSON.stringify({
+                                        from_city: fromCity,
+                                        to_city: toCity,
+                                        weight: totals.weight,
+                                        length: totals.length,
+                                        width: totals.width,
+                                        height: totals.height,
+                                    }),
+                                });
+                            }
+                        }
+                        formed = formResp.ok;
+                    } catch (e) {
+                        console.warn('FormLogisticRequest failed:', e);
+                        formed = false;
+                    }
+
+                    // 2) Очищаем гостевую корзину/черновик
+                    try {
+                        await fetch('/api/logistic-requests/draft', { method: 'DELETE' });
+                    } catch (e) {
+                        console.warn('Failed to clear guest draft:', e);
+                    }
+
                     showNotification('Заявка успешно оформлена!', 'success');
-                    // Очищаем корзину и перезагружаем страницу
+                    // 3) Переходим в React UI
                     setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
+                        if (formed) {
+                            window.location.href = '/orders';
+                        } else if (requestId) {
+                            window.location.href = `/orders/${requestId}`;
+                        } else {
+                            window.location.href = '/';
+                        }
+                    }, 800);
                 } else {
                     showNotification('Ошибка при оформлении заявки: ' + (data.error || data.message || 'Неизвестная ошибка'), 'error');
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error('Ошибка при отправке заявки:', error);
                 showNotification('Произошла ошибка при отправке заявки', 'error');
-            });
+            }
         }
 
         // Добавляем обработчики событий для автоматического пересчета при изменении полей

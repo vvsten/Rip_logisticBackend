@@ -447,6 +447,34 @@ func (r *Repository) GetCartIcon(creatorID int) (int, int, error) {
     return order.ID, count, nil
 }
 
+// GetLogisticRequestServiceQuantitySum - сумма quantity по услугам заявки
+// Используется для счетчика в UI (если одну услугу добавили 3 раза — хотим видеть 3).
+func (r *Repository) GetLogisticRequestServiceQuantitySum(orderID int) (int, error) {
+	var sum sql.NullInt64
+	err := r.db.
+		Model(&ds.LogisticRequestService{}).
+		Select("COALESCE(SUM(quantity), 0)").
+		Where("logistic_request_id = ?", orderID).
+		Scan(&sum).Error
+	if err != nil {
+		return 0, err
+	}
+	if sum.Valid {
+		return int(sum.Int64), nil
+	}
+	return 0, nil
+}
+
+// ClearUserDraftLogisticRequest - очистка черновика заявки пользователя (удаляем строки услуг)
+func (r *Repository) ClearUserDraftLogisticRequest(creatorID int) error {
+	draft, err := r.GetDraftLogisticRequest(creatorID)
+	if err != nil {
+		// Если черновика нет — считаем, что уже очищено
+		return nil
+	}
+	return r.db.Where("logistic_request_id = ?", draft.ID).Delete(&ds.LogisticRequestService{}).Error
+}
+
 // ==================== М-М ЗАЯВКА-УСЛУГА ====================
 
 // AddServiceToLogisticRequest - добавление услуги в заявку-черновик

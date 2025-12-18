@@ -30,9 +30,16 @@ export function CalculatorShortcut() {
       } catch {}
     };
     load();
+
+    // Обновляем счётчик, когда другие компоненты меняют черновик заявки
+    const onDraftUpdated = () => {
+      load();
+    };
+    window.addEventListener('draft-logistic-request-updated', onDraftUpdated);
+    return () => window.removeEventListener('draft-logistic-request-updated', onDraftUpdated);
   }, []);
 
-  const href = logisticRequestId ? `/delivery-quote?request_id=${logisticRequestId}` : '/delivery-quote';
+  const href = logisticRequestId ? `/logistic-request/quote?request_id=${logisticRequestId}` : '/logistic-request/quote';
   const isDisabled = count <= 0;
 
   return (

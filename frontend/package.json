@@ -6,17 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:api": "openapi-generator-cli generate -i ../docs/swagger.json -g typescript-axios -o src/shared/api/generated --additional-properties=supportsES6=true,useSingleRequestParameter=true,withSeparateModelsAndApi=true,modelPackage=models,apiPackage=apis"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.10.1",
     "@tauri-apps/api": "^2.9.0",
+    "axios": "^1.12.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^6.20.0"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.23.0",
     "@tauri-apps/cli": "^2.9.4",
     "@types/node": "^24.10.1",
     "@types/react": "^18.2.43",
