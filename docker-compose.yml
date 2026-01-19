@@ -42,6 +42,16 @@ services:
       timeout: 20s
       retries: 3
 
+  async-service:
+    build:
+      context: ./async-service
+    ports:
+      - "8090:8090"
+    environment:
+      ASYNC_HTTP_TIMEOUT: "5"
+      CALLBACK_BASE_URL: "http://host.docker.internal:8083"
+      ASYNC_TOKEN: "RIPGO8OK"
+
 volumes:
   postgres_data:
   redis_data:

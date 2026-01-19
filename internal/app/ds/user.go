@@ -23,4 +23,6 @@ const (
 	RoleBuyer   = "buyer"
 	RoleManager = "manager"
 	RoleAdmin   = "admin"
+	// Совместимость (в некоторых местах/БД роль могла называться "moderator")
+	RoleModerator = "moderator"
 )

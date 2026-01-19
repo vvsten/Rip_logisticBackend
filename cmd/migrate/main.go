@@ -17,51 +17,51 @@ func main() {
 
 	// Совместимость: переименовываем старые таблицы/последовательности, если они еще не переименованы
 	sqlDB, _ := db.DB()
-	
+
 	// Проверяем и переименовываем таблицы
 	var tableExists int
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'services' AND table_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER TABLE services RENAME TO transport_services`)
 	}
-	
+
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'orders' AND table_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER TABLE orders RENAME TO logistic_requests`)
 	}
-	
+
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'order_services' AND table_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER TABLE order_services RENAME TO logistic_request_services`)
 	}
-	
+
 	// Переименовываем последовательности
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name = 'services_id_seq' AND sequence_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER SEQUENCE services_id_seq RENAME TO transport_services_id_seq`)
 	}
-	
+
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name = 'orders_id_seq' AND sequence_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER SEQUENCE orders_id_seq RENAME TO logistic_requests_id_seq`)
 	}
-	
+
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.sequences WHERE sequence_name = 'order_services_id_seq' AND sequence_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER SEQUENCE order_services_id_seq RENAME TO logistic_request_services_id_seq`)
 	}
-	
+
 	// Переименовываем колонки, если они существуют
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'logistic_request_services' AND column_name = 'service_id' AND table_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER TABLE logistic_request_services RENAME COLUMN service_id TO transport_service_id`)
 	}
-	
+
 	sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'logistic_request_services' AND column_name = 'order_id' AND table_schema = 'public'`).Scan(&tableExists)
 	if tableExists > 0 {
 		sqlDB.Exec(`ALTER TABLE logistic_request_services RENAME COLUMN order_id TO logistic_request_id`)
 	}
-	
+
 	// Обновляем DEFAULT для последовательностей
 	sqlDB.Exec(`ALTER TABLE IF EXISTS transport_services ALTER COLUMN id SET DEFAULT nextval('transport_services_id_seq')`)
 	sqlDB.Exec(`ALTER TABLE IF EXISTS logistic_requests ALTER COLUMN id SET DEFAULT nextval('logistic_requests_id_seq')`)
@@ -84,6 +84,52 @@ func main() {
 	if err != nil {
 		panic("cant migrate db")
 	}
+
+	// Индексы под реально используемые запросы репозитория.
+	// Важно: делаем idempotent (IF NOT EXISTS), чтобы миграция была безопасной при повторных запусках.
+	indexDDLs := []string{
+		// logistic_requests: список заявок (GetLogisticRequests)
+		// WHERE deleted_at IS NULL AND status <> 'draft' ORDER BY created_at DESC (+ optional status/date filters)
+		`CREATE INDEX IF NOT EXISTS idx_logistic_requests_active_created_at_desc
+			ON logistic_requests (created_at DESC)
+			WHERE deleted_at IS NULL AND status <> 'draft'`,
+		`CREATE INDEX IF NOT EXISTS idx_logistic_requests_active_status_created_at_desc
+			ON logistic_requests (status, created_at DESC)
+			WHERE deleted_at IS NULL AND status <> 'draft'`,
+		`CREATE INDEX IF NOT EXISTS idx_logistic_requests_active_formed_at
+			ON logistic_requests (formed_at)
+			WHERE deleted_at IS NULL AND status <> 'draft' AND formed_at IS NOT NULL`,
+
+		// logistic_requests: черновик пользователя (GetDraftLogisticRequest / GetCartIcon)
+		// WHERE creator_id = ? AND status = 'draft' AND deleted_at IS NULL
+		`CREATE INDEX IF NOT EXISTS idx_logistic_requests_draft_creator_id
+			ON logistic_requests (creator_id)
+			WHERE deleted_at IS NULL AND status = 'draft'`,
+
+		// logistic_requests: гостевой черновик (ensureGuestDraftLogisticRequest)
+		// WHERE session_id = ? AND is_draft = true AND deleted_at IS NULL
+		`CREATE INDEX IF NOT EXISTS idx_logistic_requests_draft_session_id
+			ON logistic_requests (session_id)
+			WHERE deleted_at IS NULL AND is_draft = true`,
+
+		// transport_services: фильтры (GetTransportServicesWithFilters)
+		// WHERE deleted_at IS NULL (+ optional price/created_at)
+		`CREATE INDEX IF NOT EXISTS idx_transport_services_active_created_at_desc
+			ON transport_services (created_at DESC)
+			WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_transport_services_active_price
+			ON transport_services (price)
+			WHERE deleted_at IS NULL`,
+	}
+	for _, ddl := range indexDDLs {
+		if _, err := sqlDB.Exec(ddl); err != nil {
+			panic(err)
+		}
+	}
+	// Обновляем статистику, чтобы планировщик корректно выбирал индексы.
+	sqlDB.Exec(`ANALYZE logistic_requests`)
+	sqlDB.Exec(`ANALYZE transport_services`)
+	sqlDB.Exec(`ANALYZE logistic_request_services`)
 
 	// Создаем системных пользователей
 	users := []ds.User{

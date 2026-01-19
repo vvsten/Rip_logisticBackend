@@ -11,16 +11,16 @@ import (
 
 // AuthService - сервис авторизации
 type AuthService struct {
-	repo       *repository.Repository
-	jwtService *auth.JWTService
+	repo           *repository.Repository
+	sessionService *auth.SessionService
 }
 
 // NewAuthService - создание нового сервиса авторизации
-// Лаб7/требование: авторизация только по JWT, без Redis-сессий.
-func NewAuthService(repo *repository.Repository, jwtService *auth.JWTService) *AuthService {
+// Лаб8: авторизация по session-id в Redis (без JWT).
+func NewAuthService(repo *repository.Repository, sessionService *auth.SessionService) *AuthService {
 	return &AuthService{
-		repo:       repo,
-		jwtService: jwtService,
+		repo:           repo,
+		sessionService: sessionService,
 	}
 }
 
@@ -76,15 +76,15 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		return nil, errors.New("failed to create user")
 	}
 
-	// Генерируем токены
-	accessToken, err := s.jwtService.GenerateAccessToken(user.UUID, user.Role)
+	// Создаем session-id (access/refresh) в Redis
+	accessToken, accessExpiresAt, err := s.sessionService.CreateAccessSession(user.UUID, user.Role)
 	if err != nil {
-		return nil, errors.New("failed to generate access token")
+		return nil, errors.New("failed to create access session")
 	}
 
-	refreshToken, err := s.jwtService.GenerateRefreshToken(user.UUID, user.Role)
+	refreshToken, _, err := s.sessionService.CreateRefreshSession(user.UUID, user.Role)
 	if err != nil {
-		return nil, errors.New("failed to generate refresh token")
+		return nil, errors.New("failed to create refresh session")
 	}
 
 	// Убираем пароль из ответа
@@ -94,7 +94,7 @@ func (s *AuthService) Register(req RegisterRequest) (*AuthResponse, error) {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		User:         user,
-		ExpiresAt:    time.Now().Add(15 * time.Minute), // время жизни access токена
+		ExpiresAt:    accessExpiresAt,
 	}, nil
 }
 
@@ -111,15 +111,15 @@ func (s *AuthService) Login(req LoginRequest, hashedPassword string) (*AuthRespo
 		return nil, errors.New("invalid credentials")
 	}
 
-	// Генерируем токены
-	accessToken, err := s.jwtService.GenerateAccessToken(user.UUID, user.Role)
+	// Создаем session-id (access/refresh) в Redis
+	accessToken, accessExpiresAt, err := s.sessionService.CreateAccessSession(user.UUID, user.Role)
 	if err != nil {
-		return nil, errors.New("failed to generate access token")
+		return nil, errors.New("failed to create access session")
 	}
 
-	refreshToken, err := s.jwtService.GenerateRefreshToken(user.UUID, user.Role)
+	refreshToken, _, err := s.sessionService.CreateRefreshSession(user.UUID, user.Role)
 	if err != nil {
-		return nil, errors.New("failed to generate refresh token")
+		return nil, errors.New("failed to create refresh session")
 	}
 
 	// Убираем пароль из ответа
@@ -129,29 +129,36 @@ func (s *AuthService) Login(req LoginRequest, hashedPassword string) (*AuthRespo
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		User:         user,
-		ExpiresAt:    time.Now().Add(15 * time.Minute), // время жизни access токена
+		ExpiresAt:    accessExpiresAt,
 	}, nil
 }
 
 // Logout - выход пользователя
-func (s *AuthService) Logout(userUUID, accessToken string) error {
-	// Stateless JWT: сервер не хранит сессии. Выход — это “забыть токен” на клиенте.
-	// (Можно добавить blacklist по jti, но по требованию убираем Redis.)
+func (s *AuthService) Logout(userUUID, accessToken, refreshToken string) error {
+	// Session-id: удаляем access session из Redis.
+	// Также можем удалить refresh session, если клиент передал его (в отличие от JWT, это нужно для реального инвалидации).
 	_ = userUUID
-	_ = accessToken
-	return nil
+
+	var firstErr error
+	if accessToken != "" {
+		if err := s.sessionService.DeleteAccess(accessToken); err != nil {
+			firstErr = err
+		}
+	}
+	if refreshToken != "" {
+		if err := s.sessionService.DeleteRefresh(refreshToken); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // RefreshTokens - обновление токенов
 func (s *AuthService) RefreshTokens(refreshToken string) (*AuthResponse, error) {
-	// Валидируем refresh токен
-	claims, err := s.jwtService.ValidateToken(refreshToken)
+	// Валидируем refresh session-id
+	claims, err := s.sessionService.ValidateRefresh(refreshToken)
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
-	}
-
-	if claims.Type != "refresh" {
-		return nil, errors.New("invalid token type")
 	}
 
 	// Получаем пользователя
@@ -160,8 +167,8 @@ func (s *AuthService) RefreshTokens(refreshToken string) (*AuthResponse, error) 
 		return nil, errors.New("user not found")
 	}
 
-	// Генерируем новые токены (stateless, без Redis)
-	accessToken, newRefreshToken, err := s.jwtService.RefreshTokenPair(refreshToken)
+	// Rotation: выдаем новые session-id и инвалидируем старый refresh
+	accessToken, newRefreshToken, accessExpiresAt, err := s.sessionService.RotateRefresh(refreshToken)
 	if err != nil {
 		return nil, errors.New("failed to refresh token pair")
 	}
@@ -173,7 +180,7 @@ func (s *AuthService) RefreshTokens(refreshToken string) (*AuthResponse, error) 
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 		User:         user,
-		ExpiresAt:    time.Now().Add(15 * time.Minute), // время жизни access токена
+		ExpiresAt:    accessExpiresAt,
 	}, nil
 }
 

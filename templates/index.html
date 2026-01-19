@@ -67,18 +67,13 @@
         {{ end }}
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
+    <script src="/static/js/http.js?v=1"></script>
     <script>
         // Функция для добавления услуги в корзину
         async function addTransportServiceToDraftLogisticRequest(serviceId) {
             try {
-                const response = await fetch(`/api/logistic-requests/draft/services/${serviceId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                });
-                
-                const data = await response.json();
+                const { data } = await window.http.post(`/api/logistic-requests/draft/services/${serviceId}`, {});
                 
                 if (data.success) {
                     // Обновляем счетчик и подтягиваем id корзины
@@ -92,7 +87,8 @@
                 }
             } catch (error) {
                 console.error('Ошибка при добавлении в корзину:', error);
-                showNotification('Произошла ошибка при добавлении в корзину', 'error');
+                const serverError = error?.response?.data?.error || error?.response?.data?.message;
+                showNotification(serverError ? `Ошибка: ${serverError}` : 'Произошла ошибка при добавлении в корзину', 'error');
             }
         }
 
@@ -154,8 +150,7 @@
         // Загружаем количество в корзине при загрузке страницы
         async function loadCartCount() {
             try {
-                const response = await fetch('/api/logistic-requests/draft');
-                const data = await response.json();
+                const { data } = await window.http.get('/api/logistic-requests/draft');
                 const cartId = data?.cart?.id || data?.id || undefined;
                 const count = data?.count ?? 0;
                 updateCartCount(count, cartId);

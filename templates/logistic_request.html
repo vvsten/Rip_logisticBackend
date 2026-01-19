@@ -98,24 +98,18 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
+    <script src="/static/js/http.js?v=1"></script>
     <script>
-        function updateStatus(newStatus) {
+        async function updateStatus(newStatus) {
             const logisticRequestId = {{ .logistic_request.ID }};
             
             // Показываем загрузку
             const statusElement = document.getElementById('order-status');
             statusElement.textContent = 'Обновление...';
             
-            // Отправляем запрос
-            fetch(`/api/logistic-requests/${logisticRequestId}/status`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ status: newStatus })
-            })
-            .then(response => response.json())
-            .then(data => {
+            try {
+                const { data } = await window.http.put(`/api/logistic-requests/${logisticRequestId}/status`, { status: newStatus });
                 if (data.success) {
                     // Обновляем статус на странице
                     statusElement.textContent = newStatus;
@@ -134,12 +128,12 @@
                     showNotification('Ошибка обновления статуса: ' + data.error, 'error');
                     statusElement.textContent = '{{ .logistic_request.Status }}'; // Возвращаем старый статус
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error('Error:', error);
-                showNotification('Ошибка соединения', 'error');
+                const serverError = error?.response?.data?.error || error?.response?.data?.message;
+                showNotification(serverError ? `Ошибка: ${serverError}` : 'Ошибка соединения', 'error');
                 statusElement.textContent = '{{ .logistic_request.Status }}'; // Возвращаем старый статус
-            });
+            }
         }
         
         function showNotification(message, type) {
@@ -197,4 +191,8 @@
     </script>
 </body>
 </html>
+
+
+
+
 

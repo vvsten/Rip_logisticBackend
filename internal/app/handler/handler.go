@@ -1,46 +1,57 @@
 package handler
 
 import (
-    "github.com/gin-gonic/gin"
-    "github.com/sirupsen/logrus"
-    "rip-go-app/internal/app/ds"
-    "rip-go-app/internal/app/repository"
-    "rip-go-app/internal/app/calculator"
-    "rip-go-app/internal/app/service"
-    "rip-go-app/internal/app/middleware"
-    "net/http"
-    "strconv"
-    "strings"
-    "time"
-    "golang.org/x/crypto/bcrypt"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/bcrypt"
+	"io"
+	"net/http"
+	"rip-go-app/internal/app/calculator"
+	"rip-go-app/internal/app/ds"
+	"rip-go-app/internal/app/middleware"
+	"rip-go-app/internal/app/repository"
+	"rip-go-app/internal/app/service"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type Handler struct {
-	Repository   *repository.Repository
-	AuthService  *service.AuthService
+	Repository     *repository.Repository
+	AuthService    *service.AuthService
 	AuthMiddleware *middleware.AuthMiddleware
+	// Lab8
+	AsyncServiceURL   string
+	AsyncServiceToken string
+	PublicBaseURL     string
 }
 
-func NewHandler(r *repository.Repository, authService *service.AuthService, authMiddleware *middleware.AuthMiddleware) *Handler {
+func NewHandler(r *repository.Repository, authService *service.AuthService, authMiddleware *middleware.AuthMiddleware, asyncServiceURL, asyncServiceToken, publicBaseURL string) *Handler {
 	return &Handler{
-		Repository:     r,
-		AuthService:    authService,
-		AuthMiddleware: authMiddleware,
+		Repository:        r,
+		AuthService:       authService,
+		AuthMiddleware:    authMiddleware,
+		AsyncServiceURL:   asyncServiceURL,
+		AsyncServiceToken: asyncServiceToken,
+		PublicBaseURL:     publicBaseURL,
 	}
 }
 
 // helper для единых ошибок
 func fail(ctx *gin.Context, code int, message string) {
-    ctx.JSON(code, gin.H{
-        "status":  "fail",
-        "message": message,
-    })
+	ctx.JSON(code, gin.H{
+		"status":  "fail",
+		"message": message,
+	})
 }
 
 // GetTransportServicesPage - главная страница со списком транспортных услуг
 func (h *Handler) GetTransportServicesPage(ctx *gin.Context) {
 	search := ctx.Query("search") // получаем параметр поиска из URL
-	
+
 	services, err := h.Repository.GetTransportServices(search)
 	if err != nil {
 		logrus.Error(err)
@@ -109,7 +120,7 @@ func (h *Handler) GetDeliveryQuotePage(ctx *gin.Context) {
 		logrus.Errorf("Error getting draft logistic request services: %v", err)
 		draftServices = []ds.TransportService{}
 	}
-	
+
 	logrus.Infof("GetDeliveryQuotePage: found %d transport services in draft logistic request", len(draftServices))
 
 	ctx.HTML(http.StatusOK, "calculator.html", gin.H{
@@ -152,8 +163,7 @@ func (h *Handler) PostDeliveryQuote(ctx *gin.Context) {
 		}
 	}
 
-	
-	deliveryDays, totalCost := selectedService.DeliveryDays + int(weight/1000), selectedService.Price + (length*width*height*50) + (weight*2)
+	deliveryDays, totalCost := selectedService.DeliveryDays+int(weight/1000), selectedService.Price+(length*width*height*50)+(weight*2)
 
 	ctx.HTML(http.StatusOK, "calculator.html", gin.H{
 		"FromCity":     fromCity,
@@ -173,12 +183,12 @@ func calculateDistance(fromCity, toCity string) float64 {
 	// Приводим к нижнему регистру для сравнения
 	from := strings.ToLower(strings.TrimSpace(fromCity))
 	to := strings.ToLower(strings.TrimSpace(toCity))
-	
+
 	// Если города одинаковые
 	if from == to {
 		return 0
 	}
-	
+
 	// Простая база данных расстояний между основными городами
 	distances := map[string]map[string]float64{
 		"москва": {
@@ -204,14 +214,14 @@ func calculateDistance(fromCity, toCity string) float64 {
 			"тюмень":          1720,
 		},
 		"санкт-петербург": {
-			"спб":             0,
-			"москва":          635,
-			"екатеринбург":    1780,
-			"новосибирск":     3720,
-			"калининград":     550,
-			"мурманск":        1050,
-			"архангельск":     1130,
-			"петрозаводск":    320,
+			"спб":              0,
+			"москва":           635,
+			"екатеринбург":     1780,
+			"новосибирск":      3720,
+			"калининград":      550,
+			"мурманск":         1050,
+			"архангельск":      1130,
+			"петрозаводск":     320,
 			"великий новгород": 180,
 		},
 		"екатеринбург": {
@@ -235,14 +245,14 @@ func calculateDistance(fromCity, toCity string) float64 {
 			"барнаул":         230,
 		},
 	}
-	
+
 	// Ищем расстояние в базе данных
 	if cityDistances, exists := distances[from]; exists {
 		if distance, found := cityDistances[to]; found {
 			return distance
 		}
 	}
-	
+
 	// Если расстояние не найдено, используем примерную оценку
 	// Базовое расстояние для неизвестных маршрутов
 	return 500.0
@@ -253,13 +263,13 @@ func (h *Handler) AddTransportServiceToDraftLogisticRequest(ctx *gin.Context) {
 	serviceIDStr := ctx.Param("service_id")
 	serviceID, err := strconv.Atoi(serviceIDStr)
 	if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id, must be integer >= 0")
+		fail(ctx, http.StatusBadRequest, "invalid service id, must be integer >= 0")
 		return
 	}
 
-    err = h.Repository.AddTransportServiceToGuestDraftLogisticRequest(serviceID)
+	err = h.Repository.AddTransportServiceToGuestDraftLogisticRequest(serviceID)
 	if err != nil {
-        fail(ctx, http.StatusNotFound, err.Error())
+		fail(ctx, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -274,33 +284,33 @@ func (h *Handler) AddTransportServiceToDraftLogisticRequest(ctx *gin.Context) {
 
 // ClearDraftLogisticRequest - очистка черновика логистической заявки (guest)
 func (h *Handler) ClearDraftLogisticRequest(ctx *gin.Context) {
-    h.Repository.ClearGuestDraftLogisticRequest()
+	h.Repository.ClearGuestDraftLogisticRequest()
 
-    ctx.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "count":   0,
-        "message": "Черновик логистической заявки очищен",
-    })
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"count":   0,
+		"message": "Черновик логистической заявки очищен",
+	})
 }
 
 // GetDraftLogisticRequest - получение черновика логистической заявки (guest)
 func (h *Handler) GetDraftLogisticRequest(ctx *gin.Context) {
-    draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
+	draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
 	if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
+		fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
 		return
 	}
 
-    services, err := h.Repository.GetGuestDraftLogisticRequestServices()
+	services, err := h.Repository.GetGuestDraftLogisticRequestServices()
 	if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get transport services in draft logistic request")
+		fail(ctx, http.StatusInternalServerError, "failed to get transport services in draft logistic request")
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"draft_logistic_request": draftRequest,
-		"services": services,
-		"count":    h.Repository.GetGuestDraftLogisticRequestServiceCount(),
+		"services":               services,
+		"count":                  h.Repository.GetGuestDraftLogisticRequestServiceCount(),
 	})
 }
 
@@ -314,45 +324,45 @@ func (h *Handler) GetDraftLogisticRequestServiceCount(ctx *gin.Context) {
 func (h *Handler) CalculateLogisticRequestQuote(ctx *gin.Context) {
 	var request struct {
 		TransportServiceID int     `json:"service_id" form:"service_id"`
-		FromCity  string  `json:"from_city" form:"from_city"`
-		ToCity    string  `json:"to_city" form:"to_city"`
-		Length    float64 `json:"length" form:"length"`
-		Width     float64 `json:"width" form:"width"`
-		Height    float64 `json:"height" form:"height"`
-		Weight    float64 `json:"weight" form:"weight"`
+		FromCity           string  `json:"from_city" form:"from_city"`
+		ToCity             string  `json:"to_city" form:"to_city"`
+		Length             float64 `json:"length" form:"length"`
+		Width              float64 `json:"width" form:"width"`
+		Height             float64 `json:"height" form:"height"`
+		Weight             float64 `json:"weight" form:"weight"`
 	}
 
 	// Пробуем сначала JSON, потом form data
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		if err := ctx.ShouldBind(&request); err != nil {
-            fail(ctx, http.StatusBadRequest, "invalid request body")
+			fail(ctx, http.StatusBadRequest, "invalid request body")
 			return
 		}
 	}
 
 	// Получаем тип транспорта
-    service, err := h.Repository.GetTransportService(request.TransportServiceID)
+	service, err := h.Repository.GetTransportService(request.TransportServiceID)
 	if err != nil {
-        fail(ctx, http.StatusNotFound, "transport type not found")
+		fail(ctx, http.StatusNotFound, "transport type not found")
 		return
 	}
 
-    // Используем компонент калькулятора
-    calc := calculator.NewDeliveryCalculator()
-    res := calc.CalculateDelivery(service, request.FromCity, request.ToCity, request.Length, request.Width, request.Height, request.Weight)
+	// Используем компонент калькулятора
+	calc := calculator.NewDeliveryCalculator()
+	res := calc.CalculateDelivery(service, request.FromCity, request.ToCity, request.Length, request.Width, request.Height, request.Weight)
 
-    if !res.IsValid {
-        fail(ctx, http.StatusBadRequest, res.ErrorMessage)
-        return
-    }
+	if !res.IsValid {
+		fail(ctx, http.StatusBadRequest, res.ErrorMessage)
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{
-        "status":        "ok",
-        "delivery_days": res.DeliveryDays,
-        "total_cost":    res.TotalCost,
-        "distance":      res.Distance,
-        "volume":        res.Volume,
-    })
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":        "ok",
+		"delivery_days": res.DeliveryDays,
+		"total_cost":    res.TotalCost,
+		"distance":      res.Distance,
+		"volume":        res.Volume,
+	})
 }
 
 // FormLogisticRequest - формирование заявки создателем (дата формирования)
@@ -430,53 +440,53 @@ func (h *Handler) CreateCargoLogisticRequest(ctx *gin.Context) {
 	var request struct {
 		Services []struct {
 			TransportServiceID int     `json:"service_id"`
-			FromCity  string  `json:"from_city"`
-			ToCity    string  `json:"to_city"`
-			Length    float64 `json:"length"`
-			Width     float64 `json:"width"`
-			Height    float64 `json:"height"`
-			Weight    float64 `json:"weight"`
+			FromCity           string  `json:"from_city"`
+			ToCity             string  `json:"to_city"`
+			Length             float64 `json:"length"`
+			Width              float64 `json:"width"`
+			Height             float64 `json:"height"`
+			Weight             float64 `json:"weight"`
 		} `json:"services"`
 	}
 
-    if err := ctx.ShouldBindJSON(&request); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-    if len(request.Services) == 0 {
-        fail(ctx, http.StatusBadRequest, "no transport types provided")
+	if len(request.Services) == 0 {
+		fail(ctx, http.StatusBadRequest, "no transport types provided")
 		return
 	}
 
-    // Маппим вход в элементы заказа и сохраняем транзакционно
-    items := make([]repository.CargoLogisticRequestItem, 0, len(request.Services))
-    for _, s := range request.Services {
-        items = append(items, repository.CargoLogisticRequestItem{
-            TransportServiceID: s.TransportServiceID,
-            FromCity:  s.FromCity,
-            ToCity:    s.ToCity,
-            Length:    s.Length,
-            Width:     s.Width,
-            Height:    s.Height,
-            Weight:    s.Weight,
-        })
-    }
+	// Маппим вход в элементы заказа и сохраняем транзакционно
+	items := make([]repository.CargoLogisticRequestItem, 0, len(request.Services))
+	for _, s := range request.Services {
+		items = append(items, repository.CargoLogisticRequestItem{
+			TransportServiceID: s.TransportServiceID,
+			FromCity:           s.FromCity,
+			ToCity:             s.ToCity,
+			Length:             s.Length,
+			Width:              s.Width,
+			Height:             s.Height,
+			Weight:             s.Weight,
+		})
+	}
 
-    requestID, err := h.Repository.CreateCargoLogisticRequest(items, user.ID)
-    if err != nil {
-        // Ошибки валидации калькулятора и пр. вернём как 400
-        fail(ctx, http.StatusBadRequest, err.Error())
-        return
-    }
+	requestID, err := h.Repository.CreateCargoLogisticRequest(items, user.ID)
+	if err != nil {
+		// Ошибки валидации калькулятора и пр. вернём как 400
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
 
-    ctx.JSON(http.StatusCreated, gin.H{
+	ctx.JSON(http.StatusCreated, gin.H{
 		"success":    true,
 		"status":     "success",
 		"message":    "Логистическая заявка успешно оформлена",
 		"request_id": requestID,
-        "creator_id": user.ID,
-    })
+		"creator_id": user.ID,
+	})
 }
 
 // SearchTransportServices - поиск транспортных услуг (обработка form data)
@@ -484,30 +494,30 @@ func (h *Handler) SearchTransportServices(ctx *gin.Context) {
 	// Получаем данные из формы
 	searchQuery := ctx.PostForm("search_query")
 	transportType := ctx.PostForm("transport_type")
-	
+
 	// Если это JSON запрос, обрабатываем по-другому
 	if ctx.GetHeader("Content-Type") == "application/json" {
 		var request struct {
 			SearchQuery   string `json:"search_query"`
 			TransportType string `json:"transport_type"`
 		}
-		
-        if err := ctx.ShouldBindJSON(&request); err != nil {
-            fail(ctx, http.StatusBadRequest, "invalid request body")
+
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			fail(ctx, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		
+
 		searchQuery = request.SearchQuery
 		transportType = request.TransportType
 	}
-	
+
 	// Поиск транспорта
 	services, err := h.Repository.GetTransportServices(searchQuery)
 	if err != nil {
-        logrus.Error(err)
-        if ctx.GetHeader("Content-Type") == "application/json" {
-            fail(ctx, http.StatusInternalServerError, "failed to search transports")
-        } else {
+		logrus.Error(err)
+		if ctx.GetHeader("Content-Type") == "application/json" {
+			fail(ctx, http.StatusInternalServerError, "failed to search transports")
+		} else {
 			ctx.HTML(http.StatusInternalServerError, "error.html", gin.H{
 				"error": "Ошибка поиска транспорта",
 			})
@@ -528,11 +538,11 @@ func (h *Handler) SearchTransportServices(ctx *gin.Context) {
 
 	// Возвращаем результат в зависимости от типа запроса
 	if ctx.GetHeader("Content-Type") == "application/json" {
-        ctx.JSON(http.StatusOK, gin.H{
-            "status": "ok",
-            "transports": services,
-            "count": len(services),
-        })
+		ctx.JSON(http.StatusOK, gin.H{
+			"status":     "ok",
+			"transports": services,
+			"count":      len(services),
+		})
 	} else {
 		// Возвращаем HTML страницу с результатами
 		ctx.HTML(http.StatusOK, "index.html", gin.H{
@@ -545,9 +555,9 @@ func (h *Handler) SearchTransportServices(ctx *gin.Context) {
 // UpdateLogisticRequestStatus - обновление статуса заказа через курсор
 func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 	orderIDStr := ctx.Param("id")
-    orderID, err := strconv.Atoi(orderIDStr)
+	orderID, err := strconv.Atoi(orderIDStr)
 	if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id, must be integer >= 0")
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id, must be integer >= 0")
 		return
 	}
 
@@ -556,8 +566,8 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 		Status string `json:"status" binding:"required"`
 	}
 
-    if err := ctx.ShouldBindJSON(&request); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -571,16 +581,16 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 		}
 	}
 
-    if !isValid {
-        fail(ctx, http.StatusBadRequest, "invalid status. allowed: pending, processing, shipped, delivered, cancelled")
+	if !isValid {
+		fail(ctx, http.StatusBadRequest, "invalid status. allowed: pending, processing, shipped, delivered, cancelled")
 		return
 	}
 
 	// Обновляем статус через курсор
-    err = h.Repository.UpdateLogisticRequestStatusWithCursor(orderID, request.Status)
+	err = h.Repository.UpdateLogisticRequestStatusWithCursor(orderID, request.Status)
 	if err != nil {
-        logrus.Error(err)
-        fail(ctx, http.StatusInternalServerError, "failed to update logistic request status")
+		logrus.Error(err)
+		fail(ctx, http.StatusInternalServerError, "failed to update logistic request status")
 		return
 	}
 
@@ -598,117 +608,117 @@ func (h *Handler) UpdateLogisticRequestStatus(ctx *gin.Context) {
 
 // CreateTransportService - создание типа транспорта
 func (h *Handler) CreateTransportService(ctx *gin.Context) {
-    var req ds.TransportService
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
-    if err := h.Repository.CreateTransportService(&req); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to create service")
-        return
-    }
-    ctx.JSON(http.StatusCreated, gin.H{"status": "ok", "service": req})
+	var req ds.TransportService
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.Repository.CreateTransportService(&req); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to create service")
+		return
+	}
+	ctx.JSON(http.StatusCreated, gin.H{"status": "ok", "service": req})
 }
 
 // UpdateTransportService - обновление типа транспорта
 func (h *Handler) UpdateTransportService(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id")
-        return
-    }
-    var req ds.TransportService
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
-    req.ID = id
-    if err := h.Repository.UpdateTransportService(&req); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to update service")
-        return
-    }
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": req})
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+	var req ds.TransportService
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.ID = id
+	if err := h.Repository.UpdateTransportService(&req); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to update service")
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": req})
 }
 
 // DeleteTransportService - удаление типа транспорта
 func (h *Handler) DeleteTransportService(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id")
-        return
-    }
-    if err := h.Repository.DeleteTransportService(id); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to delete service")
-        return
-    }
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+	if err := h.Repository.DeleteTransportService(id); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to delete service")
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // GetTransportService - получение транспортной услуги JSON
 func (h *Handler) GetTransportService(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id")
-        return
-    }
-    svc, err := h.Repository.GetTransportService(id)
-    if err != nil {
-        fail(ctx, http.StatusNotFound, "service not found")
-        return
-    }
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": svc})
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+	svc, err := h.Repository.GetTransportService(id)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "service not found")
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "service": svc})
 }
 
 // GetTransportServices - получение всех транспортных услуг в JSON с фильтрацией
 // Поддерживает фильтрацию по search, minPrice, maxPrice, dateFrom, dateTo
 func (h *Handler) GetTransportServices(ctx *gin.Context) {
-    // Получаем параметры запроса из URL
-    search := ctx.Query("search")
-    
-    // Обработка minPrice
-    var minPrice *float64
-    if minPriceStr := ctx.Query("minPrice"); minPriceStr != "" {
-        if parsed, err := strconv.ParseFloat(minPriceStr, 64); err == nil {
-            minPrice = &parsed
-        }
-    }
-    
-    // Обработка maxPrice
-    var maxPrice *float64
-    if maxPriceStr := ctx.Query("maxPrice"); maxPriceStr != "" {
-        if parsed, err := strconv.ParseFloat(maxPriceStr, 64); err == nil {
-            maxPrice = &parsed
-        }
-    }
-    
-    // Обработка dateFrom
-    var dateFrom *time.Time
-    if dateFromStr := ctx.Query("dateFrom"); dateFromStr != "" {
-        if parsed, err := time.Parse("2006-01-02", dateFromStr); err == nil {
-            dateFrom = &parsed
-        }
-    }
-    
-    // Обработка dateTo
-    var dateTo *time.Time
-    if dateToStr := ctx.Query("dateTo"); dateToStr != "" {
-        if parsed, err := time.Parse("2006-01-02", dateToStr); err == nil {
-            dateTo = &parsed
-        }
-    }
-    
-    // Получаем отфильтрованные услуги из репозитория
-    services, err := h.Repository.GetTransportServicesWithFilters(search, minPrice, maxPrice, dateFrom, dateTo)
-    if err != nil {
-        logrus.Error("Error getting services:", err)
-        fail(ctx, http.StatusInternalServerError, "failed to get services")
-        return
-    }
-    
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "transport_services": services})
+	// Получаем параметры запроса из URL
+	search := ctx.Query("search")
+
+	// Обработка minPrice
+	var minPrice *float64
+	if minPriceStr := ctx.Query("minPrice"); minPriceStr != "" {
+		if parsed, err := strconv.ParseFloat(minPriceStr, 64); err == nil {
+			minPrice = &parsed
+		}
+	}
+
+	// Обработка maxPrice
+	var maxPrice *float64
+	if maxPriceStr := ctx.Query("maxPrice"); maxPriceStr != "" {
+		if parsed, err := strconv.ParseFloat(maxPriceStr, 64); err == nil {
+			maxPrice = &parsed
+		}
+	}
+
+	// Обработка dateFrom
+	var dateFrom *time.Time
+	if dateFromStr := ctx.Query("dateFrom"); dateFromStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			dateFrom = &parsed
+		}
+	}
+
+	// Обработка dateTo
+	var dateTo *time.Time
+	if dateToStr := ctx.Query("dateTo"); dateToStr != "" {
+		if parsed, err := time.Parse("2006-01-02", dateToStr); err == nil {
+			dateTo = &parsed
+		}
+	}
+
+	// Получаем отфильтрованные услуги из репозитория
+	services, err := h.Repository.GetTransportServicesWithFilters(search, minPrice, maxPrice, dateFrom, dateTo)
+	if err != nil {
+		logrus.Error("Error getting services:", err)
+		fail(ctx, http.StatusInternalServerError, "failed to get services")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "transport_services": services})
 }
 
 // ==================== ПОЛЬЗОВАТЕЛИ ====================
@@ -725,103 +735,103 @@ func (h *Handler) GetTransportServices(ctx *gin.Context) {
 // @Failure 409 {object} map[string]string "User already exists"
 // @Router /sign_up [post]
 func (h *Handler) RegisterUser(ctx *gin.Context) {
-    var req service.RegisterRequest
+	var req service.RegisterRequest
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    // Хешируем пароль
-    hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to hash password")
-        return
-    }
+	// Хешируем пароль
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
 
-    // Заменяем пароль на хеш
-    req.Password = string(hashedPassword)
+	// Заменяем пароль на хеш
+	req.Password = string(hashedPassword)
 
-    response, err := h.AuthService.Register(req)
-    if err != nil {
-        if err.Error() == "user with this login already exists" {
-            fail(ctx, http.StatusConflict, "user with this login already exists")
-            return
-        }
-        fail(ctx, http.StatusInternalServerError, err.Error())
-        return
-    }
+	response, err := h.AuthService.Register(req)
+	if err != nil {
+		if err.Error() == "user with this login already exists" {
+			fail(ctx, http.StatusConflict, "user with this login already exists")
+			return
+		}
+		fail(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
 
-    ctx.JSON(http.StatusCreated, gin.H{
-        "status":         "success",
-        "message":        "User registered successfully",
-        "access_token":   response.AccessToken,
-        "refresh_token":  response.RefreshToken,
-        "user":           response.User,
-        "expires_at":     response.ExpiresAt,
-    })
+	ctx.JSON(http.StatusCreated, gin.H{
+		"status":        "success",
+		"message":       "User registered successfully",
+		"access_token":  response.AccessToken,
+		"refresh_token": response.RefreshToken,
+		"user":          response.User,
+		"expires_at":    response.ExpiresAt,
+	})
 }
 
 // GetUserProfile - получение профиля пользователя
 func (h *Handler) GetUserProfile(ctx *gin.Context) {
-    userUUID, exists := middleware.GetUserUUID(ctx)
-    if !exists {
-        fail(ctx, http.StatusUnauthorized, "authentication required")
-        return
-    }
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
 
-    user, err := h.Repository.GetUserByUUID(userUUID)
-    if err != nil {
-        fail(ctx, http.StatusNotFound, "user not found")
-        return
-    }
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "user not found")
+		return
+	}
 
-    user.Password = ""
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "user": user})
+	user.Password = ""
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "user": user})
 }
 
 // UpdateUserProfile - обновление профиля пользователя
 func (h *Handler) UpdateUserProfile(ctx *gin.Context) {
-    var req struct {
-        Name  string `json:"name"`
-        Phone string `json:"phone"`
-        Email string `json:"email" binding:"email"`
-    }
+	var req struct {
+		Name  string `json:"name"`
+		Phone string `json:"phone"`
+		Email string `json:"email" binding:"email"`
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    userUUID, exists := middleware.GetUserUUID(ctx)
-    if !exists {
-        fail(ctx, http.StatusUnauthorized, "authentication required")
-        return
-    }
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
 
-    user, err := h.Repository.GetUserByUUID(userUUID)
-    if err != nil {
-        fail(ctx, http.StatusNotFound, "user not found")
-        return
-    }
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "user not found")
+		return
+	}
 
-    if req.Name != "" {
-        user.Name = req.Name
-    }
-    if req.Phone != "" {
-        user.Phone = req.Phone
-    }
-    if req.Email != "" {
-        user.Email = req.Email
-    }
+	if req.Name != "" {
+		user.Name = req.Name
+	}
+	if req.Phone != "" {
+		user.Phone = req.Phone
+	}
+	if req.Email != "" {
+		user.Email = req.Email
+	}
 
-    if err := h.Repository.UpdateUser(&user); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to update user")
-        return
-    }
+	if err := h.Repository.UpdateUser(&user); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to update user")
+		return
+	}
 
-    user.Password = ""
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "user": user})
+	user.Password = ""
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "user": user})
 }
 
 // LoginUser - аутентификация
@@ -836,35 +846,35 @@ func (h *Handler) UpdateUserProfile(ctx *gin.Context) {
 // @Failure 401 {object} map[string]string "Invalid credentials"
 // @Router /login [post]
 func (h *Handler) LoginUser(ctx *gin.Context) {
-    var req service.LoginRequest
+	var req service.LoginRequest
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    // Получаем пользователя
-    user, err := h.Repository.GetUserByLogin(req.Login)
-    if err != nil {
-        fail(ctx, http.StatusUnauthorized, "invalid credentials")
-        return
-    }
+	// Получаем пользователя
+	user, err := h.Repository.GetUserByLogin(req.Login)
+	if err != nil {
+		fail(ctx, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
 
-    // Проверяем пароль
-    err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
-    if err != nil {
-        fail(ctx, http.StatusUnauthorized, "invalid credentials")
-        return
-    }
+	// Проверяем пароль
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
+	if err != nil {
+		fail(ctx, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
 
-    // Используем сервис авторизации для входа
-    response, err := h.AuthService.Login(req, user.Password)
-    if err != nil {
-        fail(ctx, http.StatusUnauthorized, err.Error())
-        return
-    }
+	// Используем сервис авторизации для входа
+	response, err := h.AuthService.Login(req, user.Password)
+	if err != nil {
+		fail(ctx, http.StatusUnauthorized, err.Error())
+		return
+	}
 
-    ctx.JSON(http.StatusOK, response)
+	ctx.JSON(http.StatusOK, response)
 }
 
 // LogoutUser - деавторизация
@@ -878,35 +888,44 @@ func (h *Handler) LoginUser(ctx *gin.Context) {
 // @Failure 401 {object} map[string]string "Unauthorized"
 // @Router /logout [post]
 func (h *Handler) LogoutUser(ctx *gin.Context) {
-    userUUID, exists := middleware.GetUserUUID(ctx)
-    if !exists {
-        fail(ctx, http.StatusUnauthorized, "user not authenticated")
-        return
-    }
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
 
-    // Извлекаем токен из заголовка
-    authHeader := ctx.GetHeader("Authorization")
-    if authHeader == "" {
-        fail(ctx, http.StatusUnauthorized, "authorization header required")
-        return
-    }
+	// Опционально принимаем refresh_token в body, чтобы удалить refresh-session в Redis.
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    token := strings.TrimPrefix(authHeader, "Bearer ")
-    if token == authHeader {
-        fail(ctx, http.StatusUnauthorized, "invalid authorization header format")
-        return
-    }
+	// Извлекаем токен из заголовка
+	authHeader := ctx.GetHeader("Authorization")
+	if authHeader == "" {
+		fail(ctx, http.StatusUnauthorized, "authorization header required")
+		return
+	}
 
-    err := h.AuthService.Logout(userUUID, token)
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to logout")
-        return
-    }
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == authHeader {
+		fail(ctx, http.StatusUnauthorized, "invalid authorization header format")
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{
-        "status":  "success",
-        "message": "Logged out successfully",
-    })
+	err := h.AuthService.Logout(userUUID, token, req.RefreshToken)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to logout")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Logged out successfully",
+	})
 }
 
 // RefreshToken - обновление токенов
@@ -921,29 +940,29 @@ func (h *Handler) LogoutUser(ctx *gin.Context) {
 // @Failure 401 {object} map[string]string "Invalid refresh token"
 // @Router /refresh [post]
 func (h *Handler) RefreshToken(ctx *gin.Context) {
-    var req struct {
-        RefreshToken string `json:"refresh_token" binding:"required"`
-    }
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    response, err := h.AuthService.RefreshTokens(req.RefreshToken)
-    if err != nil {
-        fail(ctx, http.StatusUnauthorized, err.Error())
-        return
-    }
+	response, err := h.AuthService.RefreshTokens(req.RefreshToken)
+	if err != nil {
+		fail(ctx, http.StatusUnauthorized, err.Error())
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{
-        "status":         "success",
-        "message":        "Tokens refreshed successfully",
-        "access_token":   response.AccessToken,
-        "refresh_token":  response.RefreshToken,
-        "user":           response.User,
-        "expires_at":     response.ExpiresAt,
-    })
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":        "success",
+		"message":       "Tokens refreshed successfully",
+		"access_token":  response.AccessToken,
+		"refresh_token": response.RefreshToken,
+		"user":          response.User,
+		"expires_at":    response.ExpiresAt,
+	})
 }
 
 // ==================== ЛОГИСТИЧЕСКИЕ ЗАЯВКИ ====================
@@ -963,136 +982,349 @@ func (h *Handler) RefreshToken(ctx *gin.Context) {
 // @Failure 403 {object} map[string]string "Forbidden"
 // @Router /api/logistic-requests [get]
 func (h *Handler) GetLogisticRequests(ctx *gin.Context) {
-    userUUID, exists := middleware.GetUserUUID(ctx)
-    if !exists {
-        fail(ctx, http.StatusUnauthorized, "authentication required")
-        return
-    }
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
 
-    userRole, _ := middleware.GetUserRole(ctx)
-    status := ctx.Query("status")
-    dateFromStr := ctx.Query("date_from")
-    dateToStr := ctx.Query("date_to")
+	userRole, _ := middleware.GetUserRole(ctx)
+	status := ctx.Query("status")
+	dateFromStr := ctx.Query("date_from")
+	dateToStr := ctx.Query("date_to")
 
-    var dateFrom, dateTo *time.Time
-    if dateFromStr != "" {
-        if t, err := time.Parse("2006-01-02", dateFromStr); err == nil {
-            dateFrom = &t
-        }
-    }
-    if dateToStr != "" {
-        if t, err := time.Parse("2006-01-02", dateToStr); err == nil {
-            dateTo = &t
-        }
-    }
+	var dateFrom, dateTo *time.Time
+	if dateFromStr != "" {
+		if t, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			dateFrom = &t
+		}
+	}
+	if dateToStr != "" {
+		if t, err := time.Parse("2006-01-02", dateToStr); err == nil {
+			dateTo = &t
+		}
+	}
 
-    logisticRequests, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get logistic requests")
-        return
-    }
+	logisticRequests, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get logistic requests")
+		return
+	}
 
-    // Фильтрация по ролям
-    if userRole == ds.RoleBuyer {
-        // Buyer видит только свои заявки
-        user, err := h.Repository.GetUserByUUID(userUUID)
-        if err != nil {
-            fail(ctx, http.StatusInternalServerError, "failed to get user")
-            return
-        }
-        
-        var userLogisticRequests []ds.LogisticRequest
-        for _, lr := range logisticRequests {
-            if lr.CreatorID == user.ID {
-                userLogisticRequests = append(userLogisticRequests, lr)
-            }
-        }
-        logisticRequests = userLogisticRequests
-    }
-    // Manager и Admin видят все заявки
+	// Фильтрация по ролям
+	if userRole == ds.RoleBuyer {
+		// Buyer видит только свои заявки
+		user, err := h.Repository.GetUserByUUID(userUUID)
+		if err != nil {
+			fail(ctx, http.StatusInternalServerError, "failed to get user")
+			return
+		}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
+		var userLogisticRequests []ds.LogisticRequest
+		for _, lr := range logisticRequests {
+			if lr.CreatorID == user.ID {
+				userLogisticRequests = append(userLogisticRequests, lr)
+			}
+		}
+		logisticRequests = userLogisticRequests
+	}
+	// Manager/Admin/Moderator видят все заявки
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
 }
 
 // GetLogisticRequest - получение заявки по ID
 func (h *Handler) GetLogisticRequest(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    logisticRequest, err := h.Repository.GetLogisticRequest(id)
-    if err != nil {
-        fail(ctx, http.StatusNotFound, "logistic request not found")
-        return
-    }
+	logisticRequest, err := h.Repository.GetLogisticRequest(id)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "logistic request not found")
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
+}
+
+// GetLogisticRequestsLongPoll - Long polling для списка заявок
+// Держит соединение открытым до изменения данных или таймаута (30 сек)
+func (h *Handler) GetLogisticRequestsLongPoll(ctx *gin.Context) {
+	userUUID, exists := middleware.GetUserUUID(ctx)
+	if !exists {
+		fail(ctx, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	userRole, _ := middleware.GetUserRole(ctx)
+	status := ctx.Query("status")
+	dateFromStr := ctx.Query("date_from")
+	dateToStr := ctx.Query("date_to")
+	lastUpdateStr := ctx.Query("last_update") // timestamp последнего обновления
+
+	var dateFrom, dateTo *time.Time
+	if dateFromStr != "" {
+		if t, err := time.Parse("2006-01-02", dateFromStr); err == nil {
+			dateFrom = &t
+		} else {
+			logrus.Warnf("Invalid date_from format: %s", dateFromStr)
+		}
+	}
+	if dateToStr != "" {
+		if t, err := time.Parse("2006-01-02", dateToStr); err == nil {
+			dateTo = &t
+		} else {
+			logrus.Warnf("Invalid date_to format: %s", dateToStr)
+		}
+	}
+
+	var lastUpdate *time.Time
+	if lastUpdateStr != "" {
+		if t, err := time.Parse(time.RFC3339, lastUpdateStr); err == nil {
+			lastUpdate = &t
+			logrus.Infof("Long poll: lastUpdate=%v", lastUpdate)
+		} else {
+			logrus.Warnf("Invalid last_update format: %s, error: %v", lastUpdateStr, err)
+			// Не возвращаем ошибку, просто игнорируем неверный формат
+		}
+	} else {
+		logrus.Infof("Long poll: first request (no lastUpdate)")
+	}
+
+	// Таймаут для long polling: 30 секунд
+	timeout := 30 * time.Second
+	checkInterval := 1 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	logrus.Infof("Long poll: starting, deadline=%v, lastUpdate=%v", deadline, lastUpdate)
+
+	// Проверяем изменения каждую секунду до таймаута
+	checkCount := 0
+	for time.Now().Before(deadline) {
+		// Проверяем, не отменил ли клиент запрос
+		select {
+		case <-ctx.Request.Context().Done():
+			logrus.Infof("Long poll: client disconnected")
+			return
+		default:
+		}
+
+		checkCount++
+		logisticRequests, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
+		if err != nil {
+			fail(ctx, http.StatusInternalServerError, "failed to get logistic requests")
+			return
+		}
+
+		// Фильтрация по ролям
+		if userRole == ds.RoleBuyer {
+			user, err := h.Repository.GetUserByUUID(userUUID)
+			if err != nil {
+				fail(ctx, http.StatusInternalServerError, "failed to get user")
+				return
+			}
+
+			var userLogisticRequests []ds.LogisticRequest
+			for _, lr := range logisticRequests {
+				if lr.CreatorID == user.ID {
+					userLogisticRequests = append(userLogisticRequests, lr)
+				}
+			}
+			logisticRequests = userLogisticRequests
+		}
+
+		// Проверяем, изменились ли данные (сравниваем updated_at)
+		if lastUpdate != nil {
+			hasChanges := false
+			
+			// Проверяем изменения в данных
+			if len(logisticRequests) > 0 {
+				// Проверяем, есть ли новые или измененные записи
+				for _, lr := range logisticRequests {
+					// Сравниваем: если updated_at больше lastUpdate - это изменение
+					// Используем просто After без добавления секунды, чтобы не пропустить изменения
+					if lr.UpdatedAt.After(*lastUpdate) {
+						hasChanges = true
+						logrus.Infof("Long poll: changes detected after %d checks, lr.UpdatedAt=%v > lastUpdate=%v", 
+							checkCount, lr.UpdatedAt, *lastUpdate)
+						break
+					}
+				}
+			} else {
+				// Если список пустой, но был lastUpdate - это нормально, просто ждем
+				// (не считаем это изменением, чтобы не возвращать пустой список сразу)
+			}
+			
+			// Если hasChanges == true, возвращаем ответ
+			if hasChanges {
+				ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
+				return
+			}
+			
+			// Если изменений нет, продолжаем ждать (цикл продолжается)
+			// Логируем каждые 5 проверок для отладки
+			if checkCount%5 == 0 {
+				logrus.Infof("Long poll: waiting... check %d/%d, lastUpdate=%v, current time=%v", 
+					checkCount, int(timeout.Seconds()), *lastUpdate, time.Now())
+			}
+			
+			// Ждем перед следующей проверкой
+			time.Sleep(checkInterval)
+		} else {
+			// Первый запрос - возвращаем сразу
+			logrus.Infof("Long poll: first request, returning immediately")
+			ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
+			return
+		}
+	}
+
+	// Таймаут истек - возвращаем текущие данные
+	logrus.Infof("Long poll: timeout after %d checks, returning current data", checkCount)
+	logisticRequests, err := h.Repository.GetLogisticRequests(status, dateFrom, dateTo)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get logistic requests")
+		return
+	}
+
+	if userRole == ds.RoleBuyer {
+		user, err := h.Repository.GetUserByUUID(userUUID)
+		if err != nil {
+			fail(ctx, http.StatusInternalServerError, "failed to get user")
+			return
+		}
+
+		var userLogisticRequests []ds.LogisticRequest
+		for _, lr := range logisticRequests {
+			if lr.CreatorID == user.ID {
+				userLogisticRequests = append(userLogisticRequests, lr)
+			}
+		}
+		logisticRequests = userLogisticRequests
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_requests": logisticRequests})
+}
+
+// GetLogisticRequestLongPoll - Long polling для одной заявки
+// Держит соединение открытым до изменения данных или таймаута (30 сек)
+func (h *Handler) GetLogisticRequestLongPoll(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
+
+	lastUpdateStr := ctx.Query("last_update")
+
+	var lastUpdate *time.Time
+	if lastUpdateStr != "" {
+		if t, err := time.Parse(time.RFC3339, lastUpdateStr); err == nil {
+			lastUpdate = &t
+		}
+	}
+
+	// Таймаут для long polling: 30 секунд
+	timeout := 30 * time.Second
+	checkInterval := 1 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	// Проверяем изменения каждую секунду до таймаута
+	for time.Now().Before(deadline) {
+		logisticRequest, err := h.Repository.GetLogisticRequest(id)
+		if err != nil {
+			fail(ctx, http.StatusNotFound, "logistic request not found")
+			return
+		}
+
+		// Проверяем, изменились ли данные
+		if lastUpdate != nil {
+			if logisticRequest.UpdatedAt.After(*lastUpdate) {
+				// Данные изменились - возвращаем ответ
+				ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
+				return
+			}
+		} else {
+			// Первый запрос - возвращаем сразу
+			ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
+			return
+		}
+
+		// Ждем перед следующей проверкой
+		time.Sleep(checkInterval)
+	}
+
+	// Таймаут истек - возвращаем текущие данные
+	logisticRequest, err := h.Repository.GetLogisticRequest(id)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "logistic request not found")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
 }
 
 // UpdateLogisticRequest - обновление заявки
 func (h *Handler) UpdateLogisticRequest(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    var req struct {
-        FromCity string  `json:"from_city"`
-        ToCity   string  `json:"to_city"`
-        Weight   float64 `json:"weight"`
-        Length   float64 `json:"length"`
-        Width    float64 `json:"width"`
-        Height   float64 `json:"height"`
-    }
+	var req struct {
+		FromCity string  `json:"from_city"`
+		ToCity   string  `json:"to_city"`
+		Weight   float64 `json:"weight"`
+		Length   float64 `json:"length"`
+		Width    float64 `json:"width"`
+		Height   float64 `json:"height"`
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    logisticRequest, err := h.Repository.GetLogisticRequest(id)
-    if err != nil {
-        fail(ctx, http.StatusNotFound, "logistic request not found")
-        return
-    }
+	logisticRequest, err := h.Repository.GetLogisticRequest(id)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "logistic request not found")
+		return
+	}
 
-    if logisticRequest.Status != ds.StatusDraft {
-        fail(ctx, http.StatusBadRequest, "can only update draft logistic requests")
-        return
-    }
+	// Разрешаем обновление для всех статусов (не только для черновиков)
 
-    if req.FromCity != "" {
-        logisticRequest.FromCity = req.FromCity
-    }
-    if req.ToCity != "" {
-        logisticRequest.ToCity = req.ToCity
-    }
-    if req.Weight > 0 {
-        logisticRequest.Weight = req.Weight
-    }
-    if req.Length > 0 {
-        logisticRequest.Length = req.Length
-    }
-    if req.Width > 0 {
-        logisticRequest.Width = req.Width
-    }
-    if req.Height > 0 {
-        logisticRequest.Height = req.Height
-    }
+	if req.FromCity != "" {
+		logisticRequest.FromCity = req.FromCity
+	}
+	if req.ToCity != "" {
+		logisticRequest.ToCity = req.ToCity
+	}
+	if req.Weight > 0 {
+		logisticRequest.Weight = req.Weight
+	}
+	if req.Length > 0 {
+		logisticRequest.Length = req.Length
+	}
+	if req.Width > 0 {
+		logisticRequest.Width = req.Width
+	}
+	if req.Height > 0 {
+		logisticRequest.Height = req.Height
+	}
 
-    if err := h.Repository.UpdateLogisticRequest(&logisticRequest); err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to update logistic request")
-        return
-    }
+	if err := h.Repository.UpdateLogisticRequest(&logisticRequest); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to update logistic request")
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "logistic_request": logisticRequest})
 }
-
 
 // CompleteLogisticRequest - завершение/отклонение логистической заявки модератором
 // @Summary Complete or reject logistic request
@@ -1109,81 +1341,291 @@ func (h *Handler) UpdateLogisticRequest(ctx *gin.Context) {
 // @Failure 403 {object} map[string]string "Forbidden"
 // @Router /api/logistic-requests/{id}/complete [put]
 func (h *Handler) CompleteLogisticRequest(ctx *gin.Context) {
-    // Middleware уже проверил авторизацию и роль модератора
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
+	// Middleware уже проверил авторизацию и роль модератора
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    var req struct {
-        Status string `json:"status" binding:"required"`
-    }
+	var req struct {
+		Status string `json:"status" binding:"required"`
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    // Валидация статуса
-    if req.Status != ds.StatusCompleted && req.Status != ds.StatusRejected {
-        fail(ctx, http.StatusBadRequest, "invalid status. allowed: completed, rejected")
-        return
-    }
+	// Валидация статуса
+	if req.Status != ds.StatusCompleted && req.Status != ds.StatusRejected {
+		fail(ctx, http.StatusBadRequest, "invalid status. allowed: completed, rejected")
+		return
+	}
 
-    // Получаем пользователя для moderatorID
-    userUUID, _ := middleware.GetUserUUID(ctx)
-    user, err := h.Repository.GetUserByUUID(userUUID)
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get user")
-        return
-    }
+	// Получаем пользователя для moderatorID
+	userUUID, _ := middleware.GetUserUUID(ctx)
+	user, err := h.Repository.GetUserByUUID(userUUID)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get user")
+		return
+	}
 
-    err = h.Repository.CompleteLogisticRequest(id, req.Status, user.ID)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, err.Error())
-        return
-    }
+	// Если завершаем как completed — запускаем async сервис на заполнение результата по м-м.
+	// Для этого заранее вытаскиваем список услуг (м-м) по заявке.
+	var svcIDs []int
+	if req.Status == ds.StatusCompleted {
+		lr, err := h.Repository.GetLogisticRequest(id)
+		if err == nil {
+			svcIDs = make([]int, 0, len(lr.Services))
+			for _, s := range lr.Services {
+				svcIDs = append(svcIDs, s.TransportServiceID)
+			}
+		}
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{
-        "status":  "success",
-        "message": "LogisticRequest completed successfully",
-    })
+	err = h.Repository.CompleteLogisticRequest(id, req.Status, user.ID)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.Status == ds.StatusCompleted && len(svcIDs) > 0 {
+		// Триггерим async сервис (не блокируем ответ пользователю)
+		go func(orderID int, ids []int) {
+			if err := h.triggerAsyncService(orderID, ids); err != nil {
+				logrus.Errorf("failed to trigger async service for request %d: %v", orderID, err)
+			}
+		}(id, svcIDs)
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "LogisticRequest completed successfully",
+	})
+}
+
+// ==================== LAB8: Async service integration ====================
+
+// StartAsyncProcessingForRequest - ручной запуск async обработки (для демонстрации через кнопку/Insomnia).
+// Требует модераторской JWT-авторизации (см. роут).
+func (h *Handler) StartAsyncProcessingForRequest(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
+
+	lr, err := h.Repository.GetLogisticRequest(id)
+	if err != nil {
+		fail(ctx, http.StatusNotFound, "logistic request not found")
+		return
+	}
+
+	svcIDs := make([]int, 0, len(lr.Services))
+	for _, s := range lr.Services {
+		svcIDs = append(svcIDs, s.TransportServiceID)
+	}
+	if len(svcIDs) == 0 {
+		fail(ctx, http.StatusBadRequest, "no services in request")
+		return
+	}
+
+	if err := h.triggerAsyncService(id, svcIDs); err != nil {
+		fail(ctx, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	// Добавляем псевдотокен в заголовок ответа, чтобы его было видно в Network tab
+	ctx.Header("X-Async-Token", h.AsyncServiceToken)
+	
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":        "ok",
+		"message":       "async processing started",
+		"request_id":    id,
+		"async_token":   h.AsyncServiceToken, // Добавляем псевдотокен в тело ответа
+	})
+}
+
+func (h *Handler) triggerAsyncService(orderID int, transportServiceIDs []int) error {
+	if strings.TrimSpace(h.AsyncServiceURL) == "" {
+		return fmt.Errorf("async service url is not configured")
+	}
+	if strings.TrimSpace(h.AsyncServiceToken) == "" {
+		return fmt.Errorf("async service token is not configured")
+	}
+	callback := strings.TrimSpace(h.PublicBaseURL)
+	if callback == "" {
+		return fmt.Errorf("public base url is not configured")
+	}
+
+	type svc struct {
+		TransportServiceID int `json:"transport_service_id"`
+	}
+	type reqBody struct {
+		RequestID       int    `json:"request_id"`
+		CallbackBaseURL string `json:"callback_base_url"`
+		Token           string `json:"token"`
+		Services        []svc  `json:"services"`
+	}
+
+	svcs := make([]svc, 0, len(transportServiceIDs))
+	for _, id := range transportServiceIDs {
+		svcs = append(svcs, svc{TransportServiceID: id})
+	}
+
+	body := reqBody{
+		RequestID:       orderID,
+		CallbackBaseURL: callback,
+		Token:           h.AsyncServiceToken,
+		Services:        svcs,
+	}
+	b, _ := json.Marshal(body)
+
+	// Логируем токен для отладки (можно увидеть в консоли backend)
+	logrus.Infof("Sending async request to %s with token: %s", h.AsyncServiceURL, h.AsyncServiceToken)
+
+	url := strings.TrimRight(h.AsyncServiceURL, "/") + "/process"
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("async service returned status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// SetAsyncServiceResultIfEmpty - endpoint для второго сервиса: записывает результат только если он пустой.
+// Псевдо-авторизация: заголовок X-Async-Token должен совпадать с конфигом.
+func (h *Handler) SetAsyncServiceResultIfEmpty(ctx *gin.Context) {
+	receivedToken := ctx.GetHeader("X-Async-Token")
+	logrus.Infof("Received callback with X-Async-Token: %s (expected: %s)", receivedToken, h.AsyncServiceToken)
+	if receivedToken != h.AsyncServiceToken {
+		logrus.Warnf("Invalid async token received: %s (expected: %s)", receivedToken, h.AsyncServiceToken)
+		fail(ctx, http.StatusUnauthorized, "invalid async token")
+		return
+	}
+
+	orderID, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
+	serviceID, err := strconv.Atoi(ctx.Param("service_id"))
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+
+	var req struct {
+		Result string `json:"result" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated, err := h.Repository.SetAsyncResultIfEmpty(orderID, serviceID, req.Result)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":       "ok",
+		"updated":      updated,
+		"request_id":   orderID,
+		"service_id":   serviceID,
+		"async_result": req.Result,
+	})
+}
+
+// ForceSetAsyncServiceResult - endpoint для демонстрации: перезаписать результат по ключу.
+func (h *Handler) ForceSetAsyncServiceResult(ctx *gin.Context) {
+	receivedToken := ctx.GetHeader("X-Async-Token")
+	logrus.Infof("ForceSet callback with X-Async-Token: %s (expected: %s)", receivedToken, h.AsyncServiceToken)
+	if receivedToken != h.AsyncServiceToken {
+		logrus.Warnf("Invalid async token received: %s (expected: %s)", receivedToken, h.AsyncServiceToken)
+		fail(ctx, http.StatusUnauthorized, "invalid async token")
+		return
+	}
+
+	orderID, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
+	serviceID, err := strconv.Atoi(ctx.Param("service_id"))
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+
+	var req struct {
+		Result string `json:"result" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.Repository.ForceSetAsyncResult(orderID, serviceID, req.Result); err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to update result")
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"status":       "ok",
+		"request_id":   orderID,
+		"service_id":   serviceID,
+		"async_result": req.Result,
+	})
 }
 
 // DeleteLogisticRequest - удаление заявки
 func (h *Handler) DeleteLogisticRequest(ctx *gin.Context) {
-    idStr := ctx.Param("id")
-    id, err := strconv.Atoi(idStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    err = h.Repository.DeleteLogisticRequest(id)
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to delete logistic request")
-        return
-    }
+	err = h.Repository.DeleteLogisticRequest(id)
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to delete logistic request")
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request deleted successfully"})
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request deleted successfully"})
 }
 
 // GetDraftLogisticRequestIcon - получение счетчика/ID черновика заявки (для иконки)
 func (h *Handler) GetDraftLogisticRequestIcon(ctx *gin.Context) {
-    draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
-    if err != nil {
-        fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
-        return
-    }
+	draftRequest, err := h.Repository.GetGuestDraftLogisticRequestView()
+	if err != nil {
+		fail(ctx, http.StatusInternalServerError, "failed to get draft logistic request")
+		return
+	}
 
-    count := h.Repository.GetGuestDraftLogisticRequestServiceCount()
-    ctx.JSON(http.StatusOK, gin.H{
+	count := h.Repository.GetGuestDraftLogisticRequestServiceCount()
+	ctx.JSON(http.StatusOK, gin.H{
 		"status":     "ok",
 		"request_id": draftRequest.ID,
 		"count":      count,
-    })
+	})
 }
 
 // ==================== USER DRAFT (auth) ====================
@@ -1304,84 +1746,84 @@ func (h *Handler) ClearUserDraftLogisticRequest(ctx *gin.Context) {
 
 // AddServiceToLogisticRequest - добавление услуги в заявку
 func (h *Handler) AddServiceToLogisticRequest(ctx *gin.Context) {
-    var req struct {
-        LogisticRequestID   int `json:"request_id" binding:"required"`
-        TransportServiceID  int `json:"service_id" binding:"required"`
-    }
+	var req struct {
+		LogisticRequestID  int `json:"request_id" binding:"required"`
+		TransportServiceID int `json:"service_id" binding:"required"`
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
 
-    err := h.Repository.AddServiceToLogisticRequest(req.LogisticRequestID, req.TransportServiceID)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, err.Error())
-        return
-    }
+	err := h.Repository.AddServiceToLogisticRequest(req.LogisticRequestID, req.TransportServiceID)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service added to logistic request"})
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service added to logistic request"})
 }
 
 // RemoveServiceFromLogisticRequest - удаление услуги из заявки
 func (h *Handler) RemoveServiceFromLogisticRequest(ctx *gin.Context) {
-    orderIDStr := ctx.Param("id")
-    serviceIDStr := ctx.Param("service_id")
-    
-    orderID, err := strconv.Atoi(orderIDStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
-    
-    serviceID, err := strconv.Atoi(serviceIDStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id")
-        return
-    }
+	orderIDStr := ctx.Param("id")
+	serviceIDStr := ctx.Param("service_id")
 
-    err = h.Repository.RemoveServiceFromLogisticRequest(orderID, serviceID)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, err.Error())
-        return
-    }
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service removed from logistic request"})
+	serviceID, err := strconv.Atoi(serviceIDStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
+
+	err = h.Repository.RemoveServiceFromLogisticRequest(orderID, serviceID)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "transport service removed from logistic request"})
 }
 
 // UpdateLogisticRequestService - обновление м-м
 func (h *Handler) UpdateLogisticRequestService(ctx *gin.Context) {
-    orderIDStr := ctx.Param("id")
-    serviceIDStr := ctx.Param("service_id")
-    
-    orderID, err := strconv.Atoi(orderIDStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid logistic request id")
-        return
-    }
-    
-    serviceID, err := strconv.Atoi(serviceIDStr)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid service id")
-        return
-    }
+	orderIDStr := ctx.Param("id")
+	serviceIDStr := ctx.Param("service_id")
 
-    var req struct {
-        Quantity int    `json:"quantity" binding:"required,min=1"`
-        SortOrder int    `json:"sort_order"`
-        Comment  string `json:"comment"`
-    }
+	orderID, err := strconv.Atoi(orderIDStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid logistic request id")
+		return
+	}
 
-    if err := ctx.ShouldBindJSON(&req); err != nil {
-        fail(ctx, http.StatusBadRequest, "invalid request body")
-        return
-    }
+	serviceID, err := strconv.Atoi(serviceIDStr)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid service id")
+		return
+	}
 
-    err = h.Repository.UpdateLogisticRequestService(orderID, serviceID, req.Quantity, req.SortOrder, req.Comment)
-    if err != nil {
-        fail(ctx, http.StatusBadRequest, err.Error())
-        return
-    }
+	var req struct {
+		Quantity  int    `json:"quantity" binding:"required,min=1"`
+		SortOrder int    `json:"sort_order"`
+		Comment   string `json:"comment"`
+	}
 
-    ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request service updated"})
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		fail(ctx, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	err = h.Repository.UpdateLogisticRequestService(orderID, serviceID, req.Quantity, req.SortOrder, req.Comment)
+	if err != nil {
+		fail(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "ok", "message": "logistic request service updated"})
 }

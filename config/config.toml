@@ -1,5 +1,6 @@
 ServiceHost = "0.0.0.0"
 ServicePort = 8083
+PublicBaseURL = "http://localhost:8083"
 
 # HTTPS Configuration
 # Временно отключено для разработки (Tauri не может работать с самоподписанными сертификатами)
@@ -17,3 +18,8 @@ RedisHost = "localhost"
 RedisPort = 6379
 RedisPassword = ""
 RedisDB = 0
+
+# Lab8 async service configuration
+# Второй сервис будет вызывать основной по этому токену (псевдо-авторизация).
+AsyncServiceURL = "http://localhost:8090"
+AsyncServiceToken = "RIPGO8OK"

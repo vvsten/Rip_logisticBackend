@@ -11,14 +11,14 @@ import (
 
 // AuthMiddleware - middleware для проверки авторизации
 type AuthMiddleware struct {
-	jwtService *auth.JWTService
+	sessionService *auth.SessionService
 }
 
 // NewAuthMiddleware - создание нового middleware
-// Лаб7/требование: авторизация только по JWT, без Redis-сессий/blacklist.
-func NewAuthMiddleware(jwtService *auth.JWTService) *AuthMiddleware {
+// Лаб8: авторизация по session-id, хранимому в Redis (без JWT).
+func NewAuthMiddleware(sessionService *auth.SessionService) *AuthMiddleware {
 	return &AuthMiddleware{
-		jwtService: jwtService,
+		sessionService: sessionService,
 	}
 }
 
@@ -35,21 +35,12 @@ func (am *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Валидируем токен
-		claims, err := am.jwtService.ValidateToken(token)
+		// Валидируем session-id (access)
+		claims, err := am.sessionService.ValidateAccess(token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"status":  "error",
 				"message": "Invalid token",
-			})
-			c.Abort()
-			return
-		}
-
-		if claims.Type != "access" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"status":  "error",
-				"message": "Invalid token type",
 			})
 			c.Abort()
 			return
@@ -117,8 +108,8 @@ func (am *AuthMiddleware) RequireModerator() gin.HandlerFunc {
 			return
 		}
 
-		// Валидируем токен
-		claims, err := am.jwtService.ValidateToken(token)
+		// Валидируем session-id (access)
+		claims, err := am.sessionService.ValidateAccess(token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"status":  "error",
@@ -128,17 +119,8 @@ func (am *AuthMiddleware) RequireModerator() gin.HandlerFunc {
 			return
 		}
 
-		if claims.Type != "access" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"status":  "error",
-				"message": "Invalid token type",
-			})
-			c.Abort()
-			return
-		}
-
-		// Проверяем роль
-		if claims.Role != ds.RoleManager && claims.Role != ds.RoleAdmin {
+		// Проверяем роль (manager/admin + совместимость: moderator)
+		if claims.Role != ds.RoleManager && claims.Role != ds.RoleAdmin && claims.Role != ds.RoleModerator {
 			c.JSON(http.StatusForbidden, gin.H{
 				"status":  "error",
 				"message": "Insufficient permissions - only moderators can complete orders",
@@ -165,9 +147,9 @@ func (am *AuthMiddleware) OptionalAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Валидируем токен
-		claims, err := am.jwtService.ValidateToken(token)
-		if err != nil || claims.Type != "access" {
+		// Валидируем session-id (access)
+		claims, err := am.sessionService.ValidateAccess(token)
+		if err != nil {
 			c.Next()
 			return
 		}
